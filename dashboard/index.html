@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shade · Providers</title>
+<style>
+:root{color-scheme:dark;--bg:#090a0d;--panel:#111318;--panel2:#171a21;--line:#262a34;--text:#f1f3f7;--muted:#8b92a2;--blue:#8eb5ff;--danger:#ff8585}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif}
+main{width:min(820px,calc(100% - 36px));margin:64px auto}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:36px}.brand{font-size:13px;letter-spacing:.16em;color:var(--muted);font-weight:700}.status{font-size:12px;color:#9ca3b2;display:flex;align-items:center;gap:8px}.dot{width:7px;height:7px;background:#68c99a;border-radius:50%}
+h1{font-size:32px;letter-spacing:-.04em;margin:0 0 8px;font-weight:650}.sub{color:var(--muted);margin:0 0 32px}.section{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px}.section h2{font-size:14px;font-weight:600;margin:0}.count{color:var(--muted);font-size:12px}
+.providers{display:grid;gap:12px}.provider{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:14px}.provider-head{display:flex;justify-content:space-between;align-items:center}.provider-title{font-size:13px;font-weight:600;color:#dfe4ee}.remove{border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;cursor:pointer;padding:4px 0}.remove:hover{color:var(--danger)}
+.fields{display:grid;grid-template-columns:1fr 1.5fr;gap:12px}.field{display:grid;gap:7px}.field.full{grid-column:1/-1}label{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.04em}input{width:100%;height:44px;background:#0b0d12;border:1px solid var(--line);border-radius:9px;color:var(--text);padding:0 12px;font:inherit;font-size:13px;outline:none}input:focus{border-color:#7199e6;box-shadow:0 0 0 3px #7199e61c}input::placeholder{color:#5e6573}
+.actions{display:flex;justify-content:space-between;gap:12px;margin-top:16px}.btn{height:42px;border-radius:10px;padding:0 16px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:600 13px inherit;cursor:pointer}.btn.primary{background:#dce8ff;color:#101725;border-color:#dce8ff}.btn:hover{filter:brightness(1.08)}.note{font-size:12px;color:var(--muted);margin:22px 0 0}.empty{border:1px dashed var(--line);border-radius:16px;padding:34px;text-align:center;color:var(--muted);font-size:13px}
+@media(max-width:620px){main{margin:34px auto}.fields{grid-template-columns:1fr}.field.full{grid-column:auto}.top{margin-bottom:28px}h1{font-size:28px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><div class="brand">SHADE / AI GATEWAY</div><div class="status"><span class="dot"></span> Provider registry</div></div>
+  <h1>Providers</h1>
+  <p class="sub">Connect your model providers. Add as many as you need.</p>
+  <div class="section"><h2>Connected providers</h2><span class="count" id="count">0 providers</span></div>
+  <div class="providers" id="providers"></div>
+  <div class="actions"><button class="btn" id="add">＋ Add provider</button><button class="btn primary" id="export">Export provider config</button></div>
+  <p class="note">Only three details per provider: name, base URL and API key. Keys stay in this page's memory until you export; they are not saved to browser storage. Treat the exported file as a secret.</p>
+</main>
+<script>
+const root=document.querySelector('#providers'),count=document.querySelector('#count');
+let entries=[],next=0;
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function render(){
+ count.textContent=entries.length+' provider'+(entries.length===1?'':'s');
+ if(!entries.length){root.innerHTML='<div class="empty">No providers added yet.</div>';return;}
+ root.innerHTML=entries.map((p,i)=>`<section class="provider" data-id="${p.id}">
+  <div class="provider-head"><span class="provider-title">Provider ${i+1}</span><button class="remove" data-remove="${p.id}">Remove</button></div>
+  <div class="fields">
+   <div class="field"><label for="name-${p.id}">PROVIDER NAME</label><input id="name-${p.id}" data-key="name" data-id="${p.id}" placeholder="Google AI Studio" value="${escapeHtml(p.name)}"></div>
+   <div class="field"><label for="url-${p.id}">BASE URL</label><input id="url-${p.id}" data-key="baseUrl" data-id="${p.id}" placeholder="https://api.example.com/v1" value="${escapeHtml(p.baseUrl)}"></div>
+   <div class="field full"><label for="key-${p.id}">API KEY</label><input id="key-${p.id}" data-key="apiKey" data-id="${p.id}" type="password" autocomplete="off" placeholder="Paste provider API key" value="${escapeHtml(p.apiKey)}"></div>
+  </div></section>`).join('');
+}
+function add(){entries.push({id:++next,name:'',baseUrl:'',apiKey:''});render();}
+root.addEventListener('input',e=>{const key=e.target.dataset.key,id=Number(e.target.dataset.id);if(!key)return;const p=entries.find(x=>x.id===id);if(p)p[key]=e.target.value;});
+root.addEventListener('click',e=>{const id=Number(e.target.dataset.remove);if(id){entries=entries.filter(x=>x.id!==id);render();}});
+document.querySelector('#add').addEventListener('click',add);
+document.querySelector('#export').addEventListener('click',()=>{
+ const valid=entries.filter(p=>p.name.trim()&&p.baseUrl.trim()&&p.apiKey.trim());
+ if(!valid.length){alert('Add at least one provider with all three fields.');return;}
+ for(const p of valid){try{new URL(p.baseUrl)}catch{alert('Check the base URL for '+p.name);return;}}
+ const output=valid.map(({name,baseUrl,apiKey})=>({name:name.trim(),baseUrl:baseUrl.trim().replace(/\/$/,''),apiKey:apiKey.trim()}));
+ const blob=new Blob([JSON.stringify(output,null,2)],{type:'application/json'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='shade-providers.json';a.click();URL.revokeObjectURL(a.href);
+});
+add();
+</script>
+</body></html>
