@@ -330,7 +330,7 @@ function extractModelIds(payload) {
   if (Array.isArray(payload?.data)) rows = payload.data;
   else if (Array.isArray(payload?.models)) rows = payload.models;
   else if (Array.isArray(payload?.result?.models)) rows = payload.result.models;
-  return [...new Set(rows.map(row => typeof row === "string" ? row : (row?.id || row?.name)).filter(id => typeof id === "string" && id.length > 0 && id.length <= 200))].slice(0, 500);
+  return [...new Set(rows.map(row => typeof row === "string" ? row.replace(/^models\//, "") : String(row?.id || row?.name || "").replace(/^models\//, "")).filter(id => typeof id === "string" && id.length > 0 && id.length <= 200))].slice(0, 500);
 }
 
 async function discoverModels(baseUrl, apiKey) {
