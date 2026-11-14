@@ -3,4 +3,13 @@ main = "src/index.js"
 compatibility_date = "2026-11-14"
 workers_dev = true
 
-# Add secrets using: npx wrangler secret put SECRET_NAME
+[assets]
+directory = "./dashboard"
+binding = "ASSETS"
+run_worker_first = true
+
+[vars]
+CLIENT_RPM = "60"
+CLIENT_TPM = "100000"
+PROVIDER_TIMEOUT_MS = "45000"
+ALLOWED_ORIGINS = ""
