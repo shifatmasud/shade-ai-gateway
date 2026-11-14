@@ -1,0 +1,18 @@
+[
+  {
+    "id": "google",
+    "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "apiKeyEnv": "GOOGLE_API_KEY",
+    "priority": 10,
+    "limits": { "rpm": 15, "tpm": 250000 },
+    "models": { "fast": "gemini-2.5-flash" }
+  },
+  {
+    "id": "openrouter",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "apiKeyEnv": "OPENROUTER_API_KEY",
+    "priority": 20,
+    "limits": { "rpm": 30, "tpm": 100000 },
+    "models": { "fast": "google/gemini-2.5-flash" }
+  }
+]

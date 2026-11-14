@@ -1,0 +1,6 @@
+name = "shade-ai-gateway"
+main = "src/index.js"
+compatibility_date = "2026-11-14"
+workers_dev = true
+
+# Add secrets using: npx wrangler secret put SECRET_NAME
