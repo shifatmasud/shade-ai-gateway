@@ -306,8 +306,10 @@ export function withGlassShatter(Component: ComponentType<any>): ComponentType<a
                     else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = node
                 }}
                 style={{ ...style, position: "relative", cursor: "pointer", touchAction: "manipulation" }}
-                onPointerDown={shatter}
-                role="img"
+                onPointerDown={(e) => { e.preventDefault(); shatter(e) }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const r = hostRef.current?.getBoundingClientRect(); if (r) shatter({ clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 } as React.PointerEvent) } }}
                 aria-label="Shade AI Gateway mark — tap to shatter"
             >
                 <motion.div
