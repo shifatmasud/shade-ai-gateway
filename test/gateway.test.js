@@ -93,9 +93,9 @@ test('base URL accepts public HTTPS hosts and rejects unsafe URL forms', () => {
   assert.equal(validateBaseUrl('https://example.com/v1?key=x'), null);
 });
 
-test('registry migrates only Google AI Studio keys and preserves other encrypted providers', () => {
+test('registry migrates Google AI Studio keys, normalizes base URLs, and preserves other providers', () => {
   const legacy = { version: 1, providers: [
-    { id: 'google-one', baseUrl: BASE, encryptedKey: 'v1.a.b', modelIds: ['models/gemini-2.5-flash'] },
+    { id: 'google-one', baseUrl: `${BASE}/`, encryptedKey: 'v1.a.b', modelIds: ['models/gemini-2.5-flash'] },
     { id: 'other-provider', baseUrl: 'https://openrouter.ai/api/v1', encryptedKey: 'v1.c.d', modelIds: ['other'] }
   ] };
   const migrated = parseRegistry(JSON.stringify(legacy));
