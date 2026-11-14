@@ -93,9 +93,9 @@ test('base URL accepts public HTTPS hosts and rejects unsafe URL forms', () => {
   assert.equal(validateBaseUrl('https://example.com/v1?key=x'), null);
 });
 
-test('registry migrates only Google AI Studio keys and preserves other encrypted providers', () => {
+test('registry migrates Google AI Studio keys, normalizes base URLs, and preserves other providers', () => {
   const legacy = { version: 1, providers: [
-    { id: 'google-one', baseUrl: BASE, encryptedKey: 'v1.a.b', modelIds: ['models/gemini-2.5-flash'] },
+    { id: 'google-one', baseUrl: `${BASE}/`, encryptedKey: 'v1.a.b', modelIds: ['models/gemini-2.5-flash'] },
     { id: 'other-provider', baseUrl: 'https://openrouter.ai/api/v1', encryptedKey: 'v1.c.d', modelIds: ['other'] }
   ] };
   const migrated = parseRegistry(JSON.stringify(legacy));
@@ -123,23 +123,23 @@ test('manager is private, saves encrypted keys, and exposes no raw key', async (
   const initial = await worker.fetch(request('/admin/settings', { auth: true }), env);
   assert.equal(initial.status, 200);
   assert.equal((await initial.json()).baseUrl, BASE);
-  const added = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'AIza-test-secret-one' } }), env);
+  const added = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   assert.equal(added.status, 201);
   const saved = await added.json();
   assert.equal(saved.key.configured, true);
-  assert.equal(JSON.stringify(saved).includes('AIza-test-secret-one'), false);
+  assert.equal(JSON.stringify(saved).includes('google-test-secret-one'), false);
   const registry = JSON.parse(store.get('shade-ai-gateway:providers:v1'));
-  assert.notEqual(registry.keys[0].encryptedKey, 'AIza-test-secret-one');
+  assert.notEqual(registry.keys[0].encryptedKey, 'google-test-secret-one');
   const listing = await worker.fetch(request('/admin/settings', { auth: true }), env);
   const listed = await listing.json();
   assert.equal(listed.keys.length, 1);
-  assert.equal(JSON.stringify(listed).includes('AIza-test-secret-one'), false);
+  assert.equal(JSON.stringify(listed).includes('google-test-secret-one'), false);
 });
 
 test('keyless client rotates after an explicit 429 and cools down that key', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
-  for (const key of ['AIza-test-secret-one', 'AIza-test-secret-two']) {
+  for (const key of ['google-test-secret-one', 'google-test-secret-two']) {
     const response = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: key } }), env);
     assert.equal(response.status, 201);
   }
@@ -155,7 +155,7 @@ test('keyless client rotates after an explicit 429 and cools down that key', asy
 test('ambiguous upstream 5xx is not retried', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
-  const added = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'AIza-test-secret-one' } }), env);
+  const added = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   assert.equal(added.status, 201);
   upstreamMode = 'ambiguous';
   const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', body: { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
@@ -166,7 +166,7 @@ test('ambiguous upstream 5xx is not retried', async () => {
 test('model listing is keyless and returns discovered models', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
-  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'AIza-test-secret-one' } }), env);
+  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   const response = await worker.fetch(request('/v1/models'), env);
   assert.equal(response.status, 200);
   const data = await response.json();
