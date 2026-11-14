@@ -84,6 +84,17 @@ function request(path, { method = 'GET', body, auth = false } = {}) {
 }
 afterEach(() => { if (originalFetch) globalThis.fetch = originalFetch; });
 
+test('dashboard CSP allows same-origin fonts while keeping other sources restricted', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  env.ASSETS = { fetch: async () => new Response('<html></html>', { headers: { 'content-type': 'text/html' } }) };
+  const response = await worker.fetch(request('/'), env);
+  const policy = response.headers.get('content-security-policy');
+  assert.match(policy, /default-src 'none'/);
+  assert.match(policy, /font-src 'self'/);
+  assert.doesNotMatch(policy, /font-src \*/);
+});
+
 test('base URL accepts public HTTPS hosts and rejects unsafe URL forms', () => {
   assert.equal(validateBaseUrl(BASE), BASE);
   assert.equal(validateBaseUrl('http://example.com/v1'), null);
