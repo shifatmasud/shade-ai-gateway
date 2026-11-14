@@ -113,7 +113,7 @@ function parseRegistry(raw) {
             }
         });
         const chosenBase = google[0]?.baseUrl || DEFAULT_BASE_URL;
-        const migrated = google.filter(item => item.baseUrl === chosenBase).map(item => ({ id: item.id, encryptedKey: item.encryptedKey, models: item.modelIds || [], cooldownUntil: 0, legacy: true }));
+        const migrated = google.filter(item => item.baseUrl === chosenBase).map(item => ({ id: item.id, encryptedKey: item.encryptedKey, models: (item.modelIds || []).map(model => String(model).replace(/^models\//, "")), cooldownUntil: 0, legacy: true }));
         const preserved = data.providers.filter(item => !migrated.some(key => key.id === item.id));
         return { version: 1, baseUrl: chosenBase, keys: migrated, legacyProviders: preserved };
     }

@@ -9,11 +9,13 @@ let originalFetch;
 let store;
 let upstreamChatCalls;
 let upstreamMode;
+let lastUpstreamModel;
 
 function makeEnv() {
   store = new Map();
   upstreamChatCalls = 0;
   upstreamMode = 'rotate';
+  lastUpstreamModel = null;
   store.set('shade-ai-gateway:key-rotation:v1', '1');
   const fakeFetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -57,6 +59,7 @@ function makeEnv() {
     }
     if (url.hostname === 'generativelanguage.googleapis.com' && url.pathname.endsWith('/chat/completions')) {
       upstreamChatCalls++;
+      lastUpstreamModel = JSON.parse(init.body).model;
       if (upstreamMode === 'rotate' && upstreamChatCalls === 1) return new Response(JSON.stringify({ error: { message: 'RESOURCE_EXHAUSTED rate limit' } }), { status: 429, headers: { 'retry-after': '60', 'content-type': 'application/json' } });
       if (upstreamMode === 'ambiguous') return new Response(JSON.stringify({ error: { message: 'server error' } }), { status: 500 });
       return Response.json({ id: 'chatcmpl-test', choices: [{ message: { content: 'ok' } }] });
@@ -92,13 +95,14 @@ test('base URL accepts public HTTPS hosts and rejects unsafe URL forms', () => {
 
 test('registry migrates only Google AI Studio keys and preserves other encrypted providers', () => {
   const legacy = { version: 1, providers: [
-    { id: 'google-one', baseUrl: BASE, encryptedKey: 'v1.a.b', modelIds: ['gemini-2.5-flash'] },
+    { id: 'google-one', baseUrl: BASE, encryptedKey: 'v1.a.b', modelIds: ['models/gemini-2.5-flash'] },
     { id: 'other-provider', baseUrl: 'https://openrouter.ai/api/v1', encryptedKey: 'v1.c.d', modelIds: ['other'] }
   ] };
   const migrated = parseRegistry(JSON.stringify(legacy));
   assert.equal(migrated.baseUrl, BASE);
   assert.equal(migrated.keys.length, 1);
   assert.equal(migrated.keys[0].legacy, true);
+  assert.equal(migrated.keys[0].models[0], 'gemini-2.5-flash');
   assert.equal(migrated.legacyProviders.length, 1);
   assert.equal(migrated.legacyProviders[0].id, 'other-provider');
 });
@@ -139,8 +143,9 @@ test('keyless client rotates after an explicit 429 and cools down that key', asy
     const response = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: key } }), env);
     assert.equal(response.status, 201);
   }
-  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', body: { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', body: { model: 'models/gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
   assert.equal(response.status, 200);
+  assert.equal(lastUpstreamModel, 'gemini-2.5-flash');
   assert.equal(upstreamChatCalls, 2);
   const manager = await worker.fetch(request('/admin/settings', { auth: true }), env);
   const data = await manager.json();
