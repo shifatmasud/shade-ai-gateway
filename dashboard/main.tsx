@@ -1,3 +1,4 @@
+import "@fontsource-variable/inter"
 import * as React from "react"
 import { createRoot } from "react-dom/client"
 import { withGlassShatter } from "./src/GlassShatter"
