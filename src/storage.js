@@ -102,7 +102,7 @@ function parseRegistry(raw) {
     if (data?.version !== 1)
         throw new Error("Invalid key registry");
     if (Array.isArray(data.keys) && typeof data.baseUrl === "string")
-        return data;
+        return { ...data, baseUrl: data.baseUrl.replace(/\/+$/, "") };
     if (Array.isArray(data.providers)) {
         const google = data.providers.filter(item => {
             try {
@@ -112,8 +112,8 @@ function parseRegistry(raw) {
                 return false;
             }
         });
-        const chosenBase = google[0]?.baseUrl || DEFAULT_BASE_URL;
-        const migrated = google.filter(item => item.baseUrl === chosenBase).map(item => ({ id: item.id, encryptedKey: item.encryptedKey, models: (item.modelIds || []).map(model => String(model).replace(/^models\//, "")), cooldownUntil: 0, legacy: true }));
+        const chosenBase = google[0]?.baseUrl?.replace(/\/+$/, "") || DEFAULT_BASE_URL;
+        const migrated = google.filter(item => String(item.baseUrl || "").replace(/\/+$/, "") === chosenBase).map(item => ({ id: item.id, encryptedKey: item.encryptedKey, models: (item.modelIds || []).map(model => String(model).replace(/^models\//, "")), cooldownUntil: 0, legacy: true }));
         const preserved = data.providers.filter(item => !migrated.some(key => key.id === item.id));
         return { version: 1, baseUrl: chosenBase, keys: migrated, legacyProviders: preserved };
     }
