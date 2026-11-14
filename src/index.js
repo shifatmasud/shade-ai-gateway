@@ -17,7 +17,7 @@ const MAX_BODY_BYTES = 1048576;
 function cors(request, env) {
     const origin = request.headers.get("Origin");
     const allowed = String(env.ALLOWED_ORIGINS || "").split(",").map(v => v.trim()).filter(Boolean);
-    const headers = { "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "Authorization, Content-Type", "access-control-expose-headers": "x-ai-gateway-model, retry-after", "access-control-max-age": "86400", vary: "Origin" };
+    const headers = { "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "Authorization, Content-Type", "access-control-expose-headers": "x-ai-gateway-model, retry-after, x-upstream-status", "access-control-max-age": "86400", vary: "Origin" };
     if (origin && (allowed.includes("*") || allowed.includes(origin)))
         headers["access-control-allow-origin"] = origin;
     return headers;
@@ -55,7 +55,7 @@ function isQuotaFailure(status, text) {
 async function handleModels(request, env) {
     try {
         const reg = parseRegistry(await redis(env, ["GET", REGISTRY_KEY]));
-        const models = [...new Set(reg.keys.flatMap(key => key.models || []))];
+        const models = [...new Set(reg.keys.flatMap(key => (key.models || []).map(id => String(id).replace(/^models\//, ""))).filter(Boolean))];
         return json({ object: "list", data: models.map(id => ({ id, object: "model", owned_by: "shade-google-pool" })) });
     }
     catch {
@@ -78,6 +78,7 @@ async function handleChat(request, env) {
     }
     if (!body || !Array.isArray(body.messages) || typeof body.model !== "string" || !body.model.trim())
         return error("Expected a model name and messages array.", "invalid_request_error", 400);
+    body.model = body.model.replace(/^models\//, "");
     let reg;
     try {
         reg = parseRegistry(await redis(env, ["GET", REGISTRY_KEY]));
@@ -155,7 +156,16 @@ async function handleChat(request, env) {
             }
             continue;
         }
-        return error("Google AI Studio rejected the request. Check the model name, API access, or request format.", "upstream_error", 502);
+        let upstreamMessage = "";
+        try {
+            const payload = JSON.parse(detail);
+            upstreamMessage = payload?.error?.message || payload?.error?.status || payload?.message || "";
+        }
+        catch {
+            upstreamMessage = detail;
+        }
+        upstreamMessage = String(upstreamMessage).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").replace(/\s+/g, " ").slice(0, 240);
+        return error(`Google AI Studio returned HTTP ${response.status}${upstreamMessage ? `: ${upstreamMessage}` : "."}`, "upstream_error", 502, { "x-upstream-status": String(response.status) });
     }
     const latest = parseRegistry(await redis(env, ["GET", REGISTRY_KEY]));
     const future = latest.keys.map(key => key.cooldownUntil || 0).filter(value => value > Date.now());
