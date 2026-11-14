@@ -5,17 +5,18 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Shade · AI Gateway</title>
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Shade AI Gateway">SHADE <span>/ AI GATEWAY</span></a>
+      <a class="brand" href="/" aria-label="Shade AI Gateway"><span id="framer-mark" class="brand-mark" aria-hidden="true"></span><span class="brand-word">SHADE</span><span class="brand-divider">/ AI GATEWAY</span></a>
       <div class="status"><i id="statusDot"></i><span id="statusText">Connecting</span></div>
     </header>
     <section class="intro">
       <p class="eyebrow">GOOGLE AI STUDIO · KEY POOL</p>
-      <h1>One gateway.<br><span>Many keys.</span></h1>
+      <h1 data-framer-name="Headline Text">One gateway<br><span>Many keys</span></h1>
+      <div id="framer-text-reveal" aria-hidden="true"></div>
       <p class="lede">Connect multiple Google AI Studio keys. Shade rotates between them when a key reaches its rate or quota limit.</p>
     </section>
     <section class="panel" id="managerPanel" hidden>
@@ -46,5 +47,6 @@ apiKey:  <span class="muted">not required</span></pre></div>
     <footer>SHADE AI GATEWAY <span>·</span> GOOGLE AI STUDIO KEY ROTATION</footer>
   </main>
   <script defer src="/app.js"></script>
+  <script type="module" src="./main.tsx"></script>
 </body>
 </html>
