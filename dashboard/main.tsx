@@ -2,6 +2,7 @@ import * as React from "react"
 import { createRoot } from "react-dom/client"
 import { withGlassShatter } from "./src/GlassShatter"
 import TextReveal from "./src/TextReveal"
+import InkFloodButton from "./src/InkFloodButton"
 
 function ShadeMark() {
   return (
@@ -18,3 +19,9 @@ if (mount) createRoot(mount).render(<InteractiveMark />)
 
 const revealMount = document.getElementById("framer-text-reveal")
 if (revealMount) createRoot(revealMount).render(<TextReveal textNames="Headline Text" stagger={0.09} wordStagger={0.025} />)
+
+const addKeyMount = document.getElementById("addKey")
+if (addKeyMount) createRoot(addKeyMount).render(<InkFloodButton label="Add key" />)
+
+const copyMount = document.getElementById("copyUrl")
+if (copyMount) createRoot(copyMount).render(<InkFloodButton label="Copy" variant="light" />)
