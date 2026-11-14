@@ -1,16 +1,6 @@
-import { REGISTRY_KEY, json, error, readLimited, bytesToBase64, digest, redis, parseRegistry, assertPublicHost, decryptSecret, adminRoutes, setCooldown, validateBaseUrl } from "./storage.js";
+import { REGISTRY_KEY, json, error, readLimited, digest, redis, parseRegistry, assertPublicHost, decryptSecret, adminRoutes, setCooldown, validateBaseUrl } from "./storage.js";
 
 const ROTATION_KEY = "shade-ai-gateway:key-rotation:v1";
-
-const RATE_LIMIT_LUA = `local requests = redis.call('INCR', KEYS[1])
-if requests == 1 then redis.call('EXPIRE', KEYS[1], ARGV[3]) end
-local tokens = redis.call('INCRBY', KEYS[2], ARGV[2])
-if tokens == tonumber(ARGV[2]) then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
-local allowed = 1
-if tonumber(ARGV[1]) > 0 and requests > tonumber(ARGV[1]) then allowed = 0 end
-if tonumber(ARGV[4]) > 0 and tokens > tonumber(ARGV[4]) then allowed = 0 end
-local ttl = math.max(redis.call('TTL', KEYS[1]), redis.call('TTL', KEYS[2]))
-return {allowed, requests, tokens, ttl}`;
 
 const MAX_BODY_BYTES = 1048576;
 
@@ -23,15 +13,17 @@ function cors(request, env) {
     return headers;
 }
 
-function estimateTokens(body) { return Math.min(250000, Math.max(1, Math.ceil(JSON.stringify(body).length / 4)) + Math.max(1, Number(body.max_tokens ?? body.max_completion_tokens ?? 1024) || 1024)); }
-
-async function enforceClientLimit(env, request, body) {
-    const ip = request.headers.get("CF-Connecting-IP") || "unknown-client";
-    const scope = bytesToBase64(await digest(ip)).replace(/[^a-zA-Z0-9]/g, "").slice(0, 32);
-    const minute = Math.floor(Date.now() / 60000);
-    const prefix = `shade-ai-gateway:client:${scope}:${minute}`;
-    const result = await redis(env, ["EVAL", RATE_LIMIT_LUA, "2", `${prefix}:rpm`, `${prefix}:tpm`, String(Math.max(1, Number(env.CLIENT_RPM) || 20)), String(estimateTokens(body)), "60", String(Math.max(1000, Number(env.CLIENT_TPM) || 40000))]);
-    return { allowed: Number(result[0]) === 1, retryAfter: Math.max(1, Number(result[3]) || 60) };
+async function isClientAuthorized(request, env) {
+    const secret = env.GATEWAY_API_KEY;
+    if (typeof secret !== "string" || secret.length < 32 || secret === env.ADMIN_SECRET || secret === env.PROVIDER_ENCRYPTION_KEY)
+        return null;
+    const received = request.headers.get("Authorization") || "";
+    const expected = `Bearer ${secret}`;
+    const [a, b] = await Promise.all([digest(received), digest(expected)]);
+    let diff = 0;
+    for (let i = 0; i < a.length; i++)
+        diff |= a[i] ^ b[i];
+    return diff === 0 && received.length === expected.length;
 }
 
 function retryAfterSeconds(value) {
@@ -88,14 +80,6 @@ async function handleChat(request, env) {
     }
     if (!reg.keys.length)
         return error("No Google AI Studio keys are configured.", "provider_not_configured", 503);
-    try {
-        const limit = await enforceClientLimit(env, request, body);
-        if (!limit.allowed)
-            return error("Gateway rate limit exceeded for this client IP.", "rate_limit_error", 429, { "retry-after": String(limit.retryAfter) });
-    }
-    catch {
-        return error("Rate-limit service unavailable.", "service_unavailable", 503);
-    }
     const now = Date.now();
     const ready = reg.keys.filter(key => (key.cooldownUntil || 0) <= now);
     if (!ready.length) {
@@ -196,6 +180,13 @@ export default {
             return health(env);
         if (url.pathname.startsWith("/admin/"))
             return adminRoutes(request, env, url);
+        if (url.pathname.startsWith("/v1/")) {
+            const authorized = await isClientAuthorized(request, env);
+            if (authorized === null)
+                return error("Client API key is not configured correctly.", "configuration_error", 503, cors(request, env));
+            if (!authorized)
+                return error("A valid API key is required.", "authentication_error", 401, { ...cors(request, env), "www-authenticate": "Bearer" });
+        }
         if (url.pathname === "/v1/models" && request.method === "GET") {
             const response = await handleModels(request, env);
             const headers = new Headers(response.headers);

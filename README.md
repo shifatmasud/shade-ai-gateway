@@ -1,18 +1,19 @@
 # Shade AI Gateway
 
-A keyless, OpenAI-compatible gateway for a private pool of Google AI Studio API keys.
+An API-key-protected, OpenAI-compatible gateway for a private pool of Google AI Studio API keys.
 
 ## Client configuration
 
 Use one base URL in your app:
 
 ```js
-baseURL: "https://shade-ai-gateway.shifatmasud.workers.dev/v1"
+baseURL: "https://shade-ai-gateway.shifatmasud.workers.dev/v1",
+apiKey: "YOUR_SHADE_API_KEY"
 ```
 
-No Google API key or Shade gateway API key is required in the client. Use a model ID returned by `GET /v1/models` (for example, `gemini-2.5-flash`). The gateway rate-limits clients by Cloudflare's client IP header.
+Every `/v1/*` request requires the shared Shade client key in the standard `Authorization: Bearer` header. Use a model ID returned by `GET /v1/models` (for example, `gemini-2.5-flash`). The Google AI Studio provider keys remain server-side.
 
-**Access note:** this is intentionally a public, keyless endpoint. Anyone who knows the URL can call it. Per-IP RPM/TPM limits reduce accidental abuse but are not authentication; do not treat the URL as a strong access-control boundary.
+There is no IP-based access control, request rate limiting, or token quota. Anyone with the client API key can use the gateway, so share it only with trusted clients and rotate it if exposed.
 
 ## Private manager
 
@@ -35,8 +36,8 @@ Raw API keys are encrypted with AES-GCM before being stored in Upstash Redis. Th
 ## Endpoints
 
 - `GET /health` — gateway and Redis health.
-- `GET /v1/models` — merged model list; no client key required.
-- `POST /v1/chat/completions` — OpenAI-compatible chat completions; no client key required.
+- `GET /v1/models` — merged model list; requires the Shade client API key.
+- `POST /v1/chat/completions` — OpenAI-compatible chat completions; requires the Shade client API key.
 - `/admin/settings` — private manager settings.
 - `/admin/keys` — private key-pool management.
 
@@ -45,14 +46,11 @@ Raw API keys are encrypted with AES-GCM before being stored in Upstash Redis. Th
 Required Worker secrets:
 - `ADMIN_SECRET` — random private manager capability token, at least 32 characters.
 - `PROVIDER_ENCRYPTION_KEY` — stable random encryption secret, at least 32 characters. **Do not rotate this without first re-encrypting stored keys.**
+- `GATEWAY_API_KEY` — shared client API key, at least 32 characters. Keep it different from the admin and encryption secrets.
 - `UPSTASH_REDIS_REST_URL`
 - `UPSTASH_REDIS_REST_TOKEN`
 
-`GATEWAY_API_KEY` is no longer used by the keyless client API.
-
 Worker variables:
-- `CLIENT_RPM` (default 60)
-- `CLIENT_TPM` (default 100000)
 - `PROVIDER_TIMEOUT_MS` (default 45000)
 - `ALLOWED_ORIGINS` (default `*` for browser clients)
 

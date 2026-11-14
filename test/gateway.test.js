@@ -4,6 +4,7 @@ import worker, { validateBaseUrl, parseRegistry, isQuotaFailure, retryAfterSecon
 
 const ADMIN = 'admin-secret-for-tests-only-0123456789';
 const ENCRYPTION = 'encryption-secret-for-tests-only-0123456789';
+const CLIENT_KEY = 'shade-client-secret-for-tests-only-0123456789';
 const BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
 let originalFetch;
 let store;
@@ -69,16 +70,18 @@ function makeEnv() {
   globalThis.fetch = fakeFetch;
   return {
     ADMIN_SECRET: ADMIN,
+    GATEWAY_API_KEY: CLIENT_KEY,
     PROVIDER_ENCRYPTION_KEY: ENCRYPTION,
     UPSTASH_REDIS_REST_URL: 'https://redis.test',
     UPSTASH_REDIS_REST_TOKEN: 'redis-token-for-tests',
-    CLIENT_RPM: '60', CLIENT_TPM: '100000', PROVIDER_TIMEOUT_MS: '5000',
+    PROVIDER_TIMEOUT_MS: '5000',
     ALLOWED_ORIGINS: '*'
   };
 }
-function request(path, { method = 'GET', body, auth = false } = {}) {
+function request(path, { method = 'GET', body, auth = false, clientAuth = false } = {}) {
   const headers = new Headers();
   if (auth) headers.set('Authorization', `Bearer ${ADMIN}`);
+  if (clientAuth) headers.set('Authorization', `Bearer ${CLIENT_KEY}`);
   if (body !== undefined) headers.set('Content-Type', 'application/json');
   return new Request(`https://gateway.test${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
@@ -126,6 +129,27 @@ test('quota detection retries only explicit rate/quota rejections', () => {
   assert.equal(retryAfterSeconds('120'), 120);
 });
 
+test('all v1 endpoints reject missing or invalid client API keys', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  const missing = await worker.fetch(request('/v1/models'), env);
+  assert.equal(missing.status, 401);
+  assert.equal(missing.headers.get('www-authenticate'), 'Bearer');
+  const invalidRequest = new Request('https://gateway.test/v1/models', { headers: { Authorization: 'Bearer wrong-key' } });
+  const invalid = await worker.fetch(invalidRequest, env);
+  assert.equal(invalid.status, 401);
+  const health = await worker.fetch(request('/health'), env);
+  assert.equal(health.status, 200);
+});
+
+test('v1 endpoints fail closed when the client API key secret is missing', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  delete env.GATEWAY_API_KEY;
+  const response = await worker.fetch(request('/v1/models'), env);
+  assert.equal(response.status, 503);
+});
+
 test('manager is private, saves encrypted keys, and exposes no raw key', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
@@ -147,14 +171,14 @@ test('manager is private, saves encrypted keys, and exposes no raw key', async (
   assert.equal(JSON.stringify(listed).includes('google-test-secret-one'), false);
 });
 
-test('keyless client rotates after an explicit 429 and cools down that key', async () => {
+test('authenticated client rotates after an explicit 429 and cools down that key', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
   for (const key of ['google-test-secret-one', 'google-test-secret-two']) {
     const response = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: key } }), env);
     assert.equal(response.status, 201);
   }
-  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', body: { model: 'models/gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'models/gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
   assert.equal(response.status, 200);
   assert.equal(lastUpstreamModel, 'gemini-2.5-flash');
   assert.equal(upstreamChatCalls, 2);
@@ -169,16 +193,16 @@ test('ambiguous upstream 5xx is not retried', async () => {
   const added = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   assert.equal(added.status, 201);
   upstreamMode = 'ambiguous';
-  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', body: { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
   assert.equal(response.status, 502);
   assert.equal(upstreamChatCalls, 1);
 });
 
-test('model listing is keyless and returns discovered models', async () => {
+test('model listing requires client authentication and returns discovered models', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
   await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
-  const response = await worker.fetch(request('/v1/models'), env);
+  const response = await worker.fetch(request('/v1/models', { clientAuth: true }), env);
   assert.equal(response.status, 200);
   const data = await response.json();
   assert.deepEqual(data.data.map(item => item.id), ['gemini-2.5-flash', 'gemini-2.5-pro']);
