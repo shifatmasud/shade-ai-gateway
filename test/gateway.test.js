@@ -95,6 +95,7 @@ test('dashboard CSP allows same-origin fonts while keeping other sources restric
   const policy = response.headers.get('content-security-policy');
   assert.match(policy, /default-src 'none'/);
   assert.match(policy, /font-src 'self'/);
+  assert.match(policy, /img-src 'self' data:/);
   assert.doesNotMatch(policy, /font-src \*/);
 });
 
@@ -150,14 +151,19 @@ test('v1 endpoints fail closed when the client API key secret is missing', async
   assert.equal(response.status, 503);
 });
 
-test('manager is private, saves encrypted keys, and exposes no raw key', async () => {
+test('manager is private, exposes only the client key, and keeps provider keys encrypted', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
   const denied = await worker.fetch(request('/admin/settings'), env);
   assert.equal(denied.status, 401);
+  assert.equal((await denied.json()).error.type, 'authentication_error');
   const initial = await worker.fetch(request('/admin/settings', { auth: true }), env);
   assert.equal(initial.status, 200);
-  assert.equal((await initial.json()).baseUrl, BASE);
+  assert.equal(initial.headers.get('cache-control'), 'no-store');
+  const initialData = await initial.json();
+  assert.equal(initialData.baseUrl, BASE);
+  assert.equal(initialData.clientApiKey, CLIENT_KEY);
+  assert.equal(JSON.stringify(initialData).includes(ADMIN), false);
   const added = await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   assert.equal(added.status, 201);
   const saved = await added.json();
@@ -168,7 +174,23 @@ test('manager is private, saves encrypted keys, and exposes no raw key', async (
   const listing = await worker.fetch(request('/admin/settings', { auth: true }), env);
   const listed = await listing.json();
   assert.equal(listed.keys.length, 1);
+  assert.equal(listed.clientApiKey, CLIENT_KEY);
   assert.equal(JSON.stringify(listed).includes('google-test-secret-one'), false);
+});
+
+
+test('manager does not return an invalid or unconfigured client key', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  delete env.GATEWAY_API_KEY;
+  const response = await worker.fetch(request('/admin/settings', { auth: true }), env);
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.clientApiKey, null);
+  assert.equal(JSON.stringify(data).includes(env.ADMIN_SECRET), false);
+  env.GATEWAY_API_KEY = env.ADMIN_SECRET;
+  const invalid = await worker.fetch(request('/admin/settings', { auth: true }), env);
+  assert.equal((await invalid.json()).clientApiKey, null);
 });
 
 test('authenticated client rotates after an explicit 429 and cools down that key', async () => {

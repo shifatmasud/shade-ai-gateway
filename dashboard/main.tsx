@@ -6,26 +6,32 @@ import * as React from "react"
 import { createRoot } from "react-dom/client"
 import { withGlassShatter } from "./src/GlassShatter"
 import TextReveal from "./src/TextReveal"
-import InkFloodButton from "./src/InkFloodButton"
+import { Logo } from "./src/Logo"
+import { bindInk } from "./src/surface/inkButton"
 
-function ShadeMark() {
-  return (
-    <svg viewBox="0 0 200 200" width="22" height="22" role="presentation" aria-hidden="true">
-      <path d="M100 0 200 0 100 100 0 100Z" fill="currentColor" />
-      <path d="M100 100 200 100 100 200 0 200Z" fill="currentColor" />
-    </svg>
-  )
+function SurfaceMark() {
+  return <Logo size="22px" title="Shifat Masud" />
 }
 
-const InteractiveMark = withGlassShatter(ShadeMark)
+const InteractiveMark = withGlassShatter(SurfaceMark)
 const mount = document.getElementById("framer-mark")
 if (mount) createRoot(mount).render(<InteractiveMark />)
 
 const revealMount = document.getElementById("framer-text-reveal")
 if (revealMount) createRoot(revealMount).render(<TextReveal textNames="Headline Text" stagger={0.09} wordStagger={0.025} />)
 
-const addKeyMount = document.getElementById("addKey")
-if (addKeyMount) createRoot(addKeyMount).render(<InkFloodButton label="Add key" />)
-
-const copyMount = document.getElementById("copyUrl")
-if (copyMount) createRoot(copyMount).render(<InkFloodButton label="Copy" variant="light" />)
+// Surface Tension's original one-rAF button controller also binds newly-rendered provider rows.
+const inkBindings = new Map<HTMLElement, () => void>()
+function syncSurfaceButtons() {
+  for (const [element, dispose] of inkBindings) {
+    if (!element.isConnected) { dispose(); inkBindings.delete(element) }
+  }
+  document.querySelectorAll<HTMLElement>("[data-surface-button]").forEach((element) => {
+    if (inkBindings.has(element)) return
+    const kind = element.dataset.inkKind === "sound" ? "sound" : "cta"
+    inkBindings.set(element, bindInk(element, kind))
+  })
+}
+syncSurfaceButtons()
+const buttonObserver = new MutationObserver(syncSurfaceButtons)
+buttonObserver.observe(document.body, { childList: true, subtree: true })
