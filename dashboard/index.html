@@ -1,26 +1,50 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark">
-<title>Shade · Provider Manager</title>
-<link rel="stylesheet" href="/styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Shade · AI Gateway</title>
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<main>
-  <div class="top">
-    <div class="brand">SHADE / AI GATEWAY</div>
-    <div class="connection"><span class="dot" id="dot"></span><span id="connectionText">Locked</span><button class="remove" id="unlock" type="button">Unlock</button></div>
-  </div>
-  <h1>Providers</h1>
-  <p class="sub">Connect the AI services you already use. Add as many providers as you need; Shade keeps their keys in encrypted server storage.</p>
-  <div class="section"><h2>Connected providers</h2><span class="count" id="count">0 providers</span></div>
-  <div class="providers" id="providers" aria-live="polite"></div>
-  <div class="actions"><button class="btn" id="add" type="button">＋ Add provider</button><button class="btn primary" id="saveAll" type="button">Save all changes</button></div>
-  <p class="message" id="message" role="status"></p>
-  <p class="note"><strong>Only three details per provider:</strong> provider name, base URL, and API key. A saved key is never sent back to this page; the key box stays empty and says whether a key is already saved. The admin password and unsaved keys live only in this tab’s memory and are cleared when you close it.</p>
-</main>
-<script defer src="/app.js"></script>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Shade AI Gateway">SHADE <span>/ AI GATEWAY</span></a>
+      <div class="status"><i id="statusDot"></i><span id="statusText">Connecting</span></div>
+    </header>
+    <section class="intro">
+      <p class="eyebrow">GOOGLE AI STUDIO · KEY POOL</p>
+      <h1>One gateway.<br><span>Many keys.</span></h1>
+      <p class="lede">Connect multiple Google AI Studio keys. Shade rotates between them when a key reaches its rate or quota limit.</p>
+    </section>
+    <section class="panel" id="managerPanel" hidden>
+      <div class="section-head"><div><p class="eyebrow">UPSTREAM CONFIGURATION</p><h2>Shared base URL</h2></div><span class="pill">ONE URL</span></div>
+      <label for="baseUrl">GOOGLE AI STUDIO OPENAI-COMPATIBLE BASE URL</label>
+      <div class="input-row"><input id="baseUrl" type="url" spellcheck="false" autocomplete="url" placeholder="https://generativelanguage.googleapis.com/v1beta/openai"><button id="saveBase" class="button secondary">Save</button></div>
+      <div class="divider"></div>
+      <div class="section-head"><div><p class="eyebrow">PRIVATE SERVER-SIDE SECRETS</p><h2>API key pool</h2></div><span id="keyCount" class="count">0 keys</span></div>
+      <p class="hint">Keys are encrypted before storage. Raw saved keys are never shown again.</p>
+      <div id="keys" class="keys"></div>
+      <div class="add-key">
+        <label for="newKey">ADD GOOGLE AI STUDIO API KEY</label>
+        <div class="input-row"><input id="newKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="Paste an AI Studio API key"><button id="addKey" class="button primary">Add key</button></div>
+      </div>
+      <p id="message" class="message" role="status"></p>
+    </section>
+    <section class="panel locked" id="lockedPanel" hidden>
+      <p class="eyebrow">PRIVATE MANAGER</p><h2>Private link required</h2><p class="hint">Open the private management link to edit your key pool. The access token is never stored by this page.</p><p id="lockMessage" class="message error" role="status"></p>
+    </section>
+    <section class="panel client-panel">
+      <div class="section-head"><div><p class="eyebrow">CLIENT CONFIGURATION</p><h2>One keyless base URL</h2></div><span class="pill green">NO UPSTREAM KEY</span></div>
+      <p class="hint">Your app uses this gateway URL. Do not put Google AI Studio keys in client apps.</p>
+      <div class="copy-row"><code id="clientUrl">/v1</code><button id="copyUrl" class="button secondary">Copy</button></div>
+      <div class="code-sample"><div class="sample-label">OPENAI-COMPATIBLE CONFIG</div><pre>baseURL: <span id="codeUrl">/v1</span>
+apiKey:  <span class="muted">not required</span></pre></div>
+      <p class="small-note">Keyless access is rate-limited per client IP. Anyone who knows this public URL can use the gateway, so keep its address private if you want to limit access.</p>
+    </section>
+    <footer>SHADE AI GATEWAY <span>·</span> GOOGLE AI STUDIO KEY ROTATION</footer>
+  </main>
+  <script defer src="/app.js"></script>
 </body>
 </html>
