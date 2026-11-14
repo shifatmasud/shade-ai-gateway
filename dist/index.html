@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="light">
   <title>Shade · AI Gateway</title>
-  <script type="module" crossorigin src="/assets/index-C-23Nv-I.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-D_tBq9nI.css">
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <script type="module" crossorigin src="/assets/index-CgNAZS80.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-B8Nyw_74.css">
 </head>
 <body>
   <main class="shell">
@@ -21,16 +22,25 @@
       <p class="lede">One endpoint. Automatic key rotation.</p>
     </section>
     <section class="panel" id="managerPanel" hidden>
+      <div class="section-head"><div><p class="eyebrow">CLIENT ACCESS</p><h2>Gateway API key</h2></div><span id="clientKeyStatus" class="pill green">CONFIGURED</span></div>
+      <label for="clientApiKey">SHADE CLIENT BEARER KEY</label>
+      <div class="input-row client-key-row">
+        <input id="clientApiKey" type="password" readonly autocomplete="off" spellcheck="false" placeholder="GATEWAY_API_KEY is not configured" aria-label="Shade client API key">
+        <button id="toggleClientKey" type="button" class="surface-button surface-button--light" data-surface-button data-ink-kind="sound" aria-pressed="false"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Show</span><span class="ir-b" aria-hidden="true">Show</span></span></span><span class="ink" aria-hidden="true"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Show</span><span class="ir-b" aria-hidden="true">Show</span></span></span></span></button>
+        <button id="copyClientKey" type="button" class="surface-button surface-button--dark" data-surface-button data-ink-kind="cta"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Copy key</span><span class="ir-b" aria-hidden="true">Copy key</span></span></span><span class="ink" aria-hidden="true"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Copy key</span><span class="ir-b" aria-hidden="true">Copy key</span></span></span></span></button>
+      </div>
+      <p class="small-note">Loaded from the Worker secret after manager authentication. The public client page never receives this value.</p>
+      <div class="divider"></div>
       <div class="section-head"><div><p class="eyebrow">UPSTREAM</p><h2>Base URL</h2></div><span class="pill">ONE URL</span></div>
       <label for="baseUrl">UPSTREAM BASE URL</label>
-      <div class="input-row"><input id="baseUrl" type="url" spellcheck="false" autocomplete="url" placeholder="https://generativelanguage.googleapis.com/v1beta/openai"><button id="saveBase" class="button secondary">Save</button></div>
+      <div class="input-row"><input id="baseUrl" type="url" spellcheck="false" autocomplete="url" placeholder="https://generativelanguage.googleapis.com/v1beta/openai"><button id="saveBase" type="button" class="surface-button surface-button--light" data-surface-button data-ink-kind="sound"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Save</span><span class="ir-b" aria-hidden="true">Save</span></span></span><span class="ink" aria-hidden="true"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Save</span><span class="ir-b" aria-hidden="true">Save</span></span></span></span></button></div>
       <div class="divider"></div>
       <div class="section-head"><div><p class="eyebrow">PROVIDERS</p><h2>Key pool</h2></div><span id="keyCount" class="count">0 keys</span></div>
 
       <div id="keys" class="keys"></div>
       <div class="add-key">
         <label for="newKey">ADD API KEY</label>
-        <div class="input-row"><input id="newKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="API key"><button id="addKey" class="button primary">Add key</button></div>
+        <div class="input-row"><input id="newKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="API key"><button id="addKey" type="button" class="surface-button surface-button--dark" data-surface-button data-ink-kind="cta"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Add key</span><span class="ir-b" aria-hidden="true">Add key</span></span></span><span class="ink" aria-hidden="true"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Add key</span><span class="ir-b" aria-hidden="true">Add key</span></span></span></span></button></div>
       </div>
       <p id="message" class="message" role="status"></p>
     </section>
@@ -38,11 +48,11 @@
       <p class="eyebrow">MANAGER</p><h2>Private link required</h2><p id="lockMessage" class="message error" role="status"></p>
     </section>
     <section class="panel client-panel">
-      <div class="section-head"><div><p class="eyebrow">CLIENT</p><h2>One endpoint</h2></div><span class="pill green">NO UPSTREAM KEY</span></div>
+      <div class="section-head"><div><p class="eyebrow">CLIENT</p><h2>One endpoint</h2></div><span class="pill green">API KEY REQUIRED</span></div>
 
-      <div class="copy-row"><code id="clientUrl">/v1</code><button id="copyUrl" class="button secondary">Copy</button></div>
+      <div class="copy-row"><code id="clientUrl">/v1</code><button id="copyUrl" type="button" class="surface-button surface-button--light" data-surface-button data-ink-kind="sound"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Copy</span><span class="ir-b" aria-hidden="true">Copy</span></span></span><span class="ink" aria-hidden="true"><span class="surface-button__label ink-par"><span class="ir"><span class="ir-a">Copy</span><span class="ir-b" aria-hidden="true">Copy</span></span></span></span></button></div>
       <div class="code-sample"><div class="sample-label">OPENAI-COMPATIBLE CONFIG</div><pre>baseURL: <span id="codeUrl">/v1</span>
-apiKey:  <span class="muted">not required</span></pre></div>
+apiKey:  <span class="muted">YOUR_SHADE_API_KEY</span></pre></div>
 
     </section>
     <footer>SHADE / AI GATEWAY</footer>

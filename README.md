@@ -19,11 +19,9 @@ There is no IP-based access control, request rate limiting, or token quota. Anyo
 
 The manager is served at `/`. Its private capability link carries the admin token in the URL fragment (`#manage=...`). The fragment is not sent in HTTP requests. The dashboard keeps the token in page memory only and sends it in an Authorization header to same-origin `/admin/*` endpoints. Do not share the link.
 
-The manager exposes only:
-- One shared Google AI Studio OpenAI-compatible base URL.
-- Multiple Google AI Studio API key slots.
+The authenticated manager shows the shared client bearer key from `GATEWAY_API_KEY` (masked by default, with explicit reveal/copy controls), the upstream base URL, and provider key-pool metadata. The client key is returned only from the admin-authenticated settings endpoint with `no-store` caching and is never included in the public client panel.
 
-Raw API keys are encrypted with AES-GCM before being stored in Upstash Redis. The manager never receives a saved key again.
+Upstream provider API keys are encrypted with AES-GCM before being stored in Upstash Redis. The manager never receives a saved provider key again.
 
 ## Key rotation behavior
 

@@ -209,7 +209,7 @@ export default {
             const headers = new Headers(response.headers);
             headers.set("x-content-type-options", "nosniff");
             headers.set("referrer-policy", "no-referrer");
-            headers.set("content-security-policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+            headers.set("content-security-policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
             headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
             headers.set("cache-control", "no-cache");
             return new Response(response.body, { status: response.status, headers });

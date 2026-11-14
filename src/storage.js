@@ -249,7 +249,12 @@ async function adminRoutes(request, env, url) {
     if (request.method === "GET" && url.pathname === "/admin/settings") {
         try {
             const reg = parseRegistry(await redis(env, ["GET", REGISTRY_KEY]));
-            return json({ baseUrl: reg.baseUrl, keys: reg.keys.map(safeKey) });
+            const clientApiKey = typeof env.GATEWAY_API_KEY === "string"
+                && env.GATEWAY_API_KEY.length >= 32
+                && env.GATEWAY_API_KEY !== env.ADMIN_SECRET
+                && env.GATEWAY_API_KEY !== env.PROVIDER_ENCRYPTION_KEY
+                ? env.GATEWAY_API_KEY : null;
+            return json({ baseUrl: reg.baseUrl, keys: reg.keys.map(safeKey), clientApiKey });
         }
         catch {
             return error("Key storage is unavailable.", "service_unavailable", 503);
