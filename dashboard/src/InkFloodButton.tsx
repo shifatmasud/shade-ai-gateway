@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "framer-motion"
 
 type Props = { label?: string; variant?: "dark" | "light" }
 type Ripple = { id: number; x: number; y: number }
+type InteractionEvent = React.PointerEvent<HTMLSpanElement> | React.MouseEvent<HTMLSpanElement>
 
 /** Portfolio InkButtons interaction adapted to the gateway's native action. */
 export default function InkFloodButton({ label = "Add key", variant = "dark" }: Props) {
@@ -13,7 +14,7 @@ export default function InkFloodButton({ label = "Add key", variant = "dark" }: 
   const nextRipple = React.useRef(0)
   const reduceMotion = useReducedMotion()
 
-  const locate = (event: React.PointerEvent<HTMLSpanElement>) => {
+  const locate = (event: InteractionEvent) => {
     const rect = event.currentTarget.getBoundingClientRect()
     const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100))
     const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100))
@@ -35,11 +36,16 @@ export default function InkFloodButton({ label = "Add key", variant = "dark" }: 
   return (
     <motion.span
       className={`ink-button-content${active ? " is-active" : ""}${variant === "light" ? " is-light" : ""}`}
+      tabIndex={-1}
       animate={reduceMotion ? undefined : { x: magnet.x, y: magnet.y }}
       transition={{ duration: 0.28, ease: [0.19, 1, 0.22, 1] }}
       onPointerEnter={(event) => { locate(event); setActive(true) }}
       onPointerMove={locate}
       onPointerLeave={() => { setActive(false); setMagnet({ x: 0, y: 0 }) }}
+      onMouseEnter={(event) => { locate(event); setActive(true) }}
+      onMouseOver={(event) => { locate(event); setActive(true) }}
+      onMouseMove={locate}
+      onMouseLeave={() => { setActive(false); setMagnet({ x: 0, y: 0 }) }}
       onPointerDown={ripple}
       whileTap={reduceMotion ? undefined : { scaleX: 1.04, scaleY: 0.92 }}
     >
