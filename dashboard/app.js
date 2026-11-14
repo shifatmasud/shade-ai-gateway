@@ -21,26 +21,43 @@
     connectionText.textContent = connected ? 'Connected securely' : 'Locked';
   }
   function promptForSecret() {
-    const value = window.prompt('Enter your Shade admin password. It is used only in this tab and is never saved.');
-    if (!value) return false;
-    adminSecret = value;
-    return true;
+    let panel = document.querySelector('#unlockPanel');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'unlockPanel';
+      panel.style.cssText = 'margin:18px 0;padding:18px;border:1px solid #303644;border-radius:14px;background:#111318';
+      panel.innerHTML = '<form id="unlockForm" style="display:grid;gap:10px;max-width:420px"><label for="adminPassword">ADMIN PASSWORD</label><input id="adminPassword" type="password" autocomplete="current-password" required placeholder="Enter admin password"><button class="btn primary" type="submit">Unlock manager</button></form>';
+      message.insertAdjacentElement('afterend', panel);
+      panel.querySelector('form').addEventListener('submit', async event => {
+        event.preventDefault();
+        const field = panel.querySelector('input');
+        adminSecret = field.value;
+        field.value = '';
+        panel.hidden = true;
+        await load();
+      });
+    }
+    panel.hidden = false;
+    panel.querySelector('input').focus();
+    return false;
   }
-  async function api(path, options = {}, mayPrompt = true) {
-    if (!adminSecret && mayPrompt && !promptForSecret()) throw new Error('Unlock the manager to continue.');
+  async function api(path, options = {}) {
+    if (!adminSecret) {
+      promptForSecret();
+      throw new Error('Enter the admin password to unlock the manager.');
+    }
     const headers = new Headers(options.headers || {});
     headers.set('Authorization', `Bearer ${adminSecret}`);
     if (options.body) headers.set('Content-Type', 'application/json');
     const response = await fetch(path, { ...options, headers, cache: 'no-store', credentials: 'same-origin' });
-    if (response.status === 401 && mayPrompt) {
-      adminSecret = '';
-      if (!promptForSecret()) throw new Error('Unlock the manager to continue.');
-      return api(path, options, false);
-    }
     let payload = {};
     try { payload = await response.json(); } catch {}
     if (!response.ok) {
-      if (response.status === 401) { adminSecret = ''; setConnected(false); }
+      if (response.status === 401) {
+        adminSecret = '';
+        setConnected(false);
+        promptForSecret();
+      }
       throw new Error(payload?.error?.message || `Request failed (${response.status}).`);
     }
     setConnected(true);
@@ -171,7 +188,7 @@
   });
   document.querySelector('#unlock').addEventListener('click', () => {
     adminSecret = '';
-    if (promptForSecret()) load();
+    promptForSecret();
   });
   load();
 })();
