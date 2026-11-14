@@ -4,18 +4,8 @@ import "@fontsource/inter/latin-600.css"
 import "@fontsource/inter/latin-700.css"
 import * as React from "react"
 import { createRoot } from "react-dom/client"
-import { withGlassShatter } from "./src/GlassShatter"
 import TextReveal from "./src/TextReveal"
-import { Logo } from "./src/Logo"
 import { bindInk } from "./src/surface/inkButton"
-
-function SurfaceMark() {
-  return <Logo size="22px" title="Shifat Masud" />
-}
-
-const InteractiveMark = withGlassShatter(SurfaceMark)
-const mount = document.getElementById("framer-mark")
-if (mount) createRoot(mount).render(<InteractiveMark />)
 
 const revealMount = document.getElementById("framer-text-reveal")
 if (revealMount) createRoot(revealMount).render(<TextReveal textNames="Headline Text" stagger={0.09} wordStagger={0.025} />)
