@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Shade · Provider Manager</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main>
+  <div class="top">
+    <div class="brand">SHADE / AI GATEWAY</div>
+    <div class="connection"><span class="dot" id="dot"></span><span id="connectionText">Locked</span><button class="remove" id="unlock" type="button">Unlock</button></div>
+  </div>
+  <h1>Providers</h1>
+  <p class="sub">Connect the AI services you already use. Add as many providers as you need; Shade keeps their keys in encrypted server storage.</p>
+  <div class="section"><h2>Connected providers</h2><span class="count" id="count">0 providers</span></div>
+  <div class="providers" id="providers" aria-live="polite"></div>
+  <div class="actions"><button class="btn" id="add" type="button">＋ Add provider</button><button class="btn primary" id="saveAll" type="button">Save all changes</button></div>
+  <p class="message" id="message" role="status"></p>
+  <p class="note"><strong>Only three details per provider:</strong> provider name, base URL, and API key. A saved key is never sent back to this page; the key box stays empty and says whether a key is already saved. The admin password and unsaved keys live only in this tab’s memory and are cleared when you close it.</p>
+</main>
+<script defer src="/app.js"></script>
+</body>
+</html>
