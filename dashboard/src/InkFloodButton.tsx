@@ -36,12 +36,14 @@ export default function InkFloodButton({ label = "Add key", variant = "dark" }: 
   return (
     <motion.span
       className={`ink-button-content${active ? " is-active" : ""}${variant === "light" ? " is-light" : ""}`}
+      tabIndex={-1}
       animate={reduceMotion ? undefined : { x: magnet.x, y: magnet.y }}
       transition={{ duration: 0.28, ease: [0.19, 1, 0.22, 1] }}
       onPointerEnter={(event) => { locate(event); setActive(true) }}
       onPointerMove={locate}
       onPointerLeave={() => { setActive(false); setMagnet({ x: 0, y: 0 }) }}
       onMouseEnter={(event) => { locate(event); setActive(true) }}
+      onMouseOver={(event) => { locate(event); setActive(true) }}
       onMouseMove={locate}
       onMouseLeave={() => { setActive(false); setMagnet({ x: 0, y: 0 }) }}
       onPointerDown={ripple}
