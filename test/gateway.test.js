@@ -75,6 +75,17 @@ function makeEnv() {
       assert.deepEqual(sent.messages, [{ role: 'user', content: 'hello' }]);
       if (upstreamMode === 'rotate' && upstreamGenerateCalls === 1) return new Response(JSON.stringify({ error: { message: 'RESOURCE_EXHAUSTED rate limit' } }), { status: 429, headers: { 'retry-after': '60', 'content-type': 'application/json' } });
       if (upstreamMode === 'ambiguous') return new Response(JSON.stringify({ error: { message: 'server error' } }), { status: 500 });
+      if (sent.stream && upstreamMode === 'slow-stream') {
+        const chunks = ['data: first\n\n', 'data: second\n\n', 'data: third\n\n', 'data: [DONE]\n\n'];
+        let index = 0;
+        return new Response(new ReadableStream({
+          async pull(controller) {
+            if (index >= chunks.length) { controller.close(); return; }
+            await new Promise(resolve => setTimeout(resolve, 600));
+            controller.enqueue(new TextEncoder().encode(chunks[index++]));
+          }
+        }), { headers: { 'content-type': 'text/event-stream' } });
+      }
       if (sent.stream) {
         const events = ['data: ' + JSON.stringify({ id: 'chatcmpl_test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'stream ' }, finish_reason: null }] }) + '\n\n', 'data: ' + JSON.stringify({ id: 'chatcmpl_test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'works' }, finish_reason: 'stop' }] }) + '\n\n', 'data: [DONE]\n\n'].join('');
         return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
@@ -280,6 +291,21 @@ test('OpenAI-compatible SSE is passed through without translating chunks', async
   assert.match(stream, /"content":"stream "/);
   assert.match(stream, /"content":"works"/);
   assert.equal(stream.endsWith('data: [DONE]\n\n'), true);
+});
+
+test('active SSE streams can outlive the provider timeout without being aborted', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  env.PROVIDER_TIMEOUT_MS = '1000';
+  upstreamMode = 'slow-stream';
+  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', stream: true, messages: [{ role: 'user', content: 'hello' }] } }), env);
+  assert.equal(response.status, 200);
+  const stream = await response.text();
+  assert.match(stream, /data: first/);
+  assert.match(stream, /data: second/);
+  assert.match(stream, /data: third/);
+  assert.match(stream, /data: \[DONE\]/);
 });
 
 test('strips only Gemini-incompatible prompt_cache_key and preserves the rest of the request', async () => {

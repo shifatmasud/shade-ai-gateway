@@ -13,18 +13,18 @@ function isQuotaFailure(status, text) {
  if (status !== 403) return false;
  return /(quota|resource_exhausted|rate.?limit|billing|exceeded.*(limit|quota)|limit.*exceeded)/i.test(text || "");
 }
-function responseWithCleanup(response, model, timer) {
+function responseWithCleanup(response, model, timeout) {
  const headers = new Headers(response.headers);
  for (const name of ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length", "set-cookie"]) headers.delete(name);
  headers.set("cache-control", "no-store");
  headers.set("x-ai-gateway-model", model);
  headers.set("x-upstream-status", String(response.status));
- if (!response.body) { clearTimeout(timer); return new Response(null, { status: response.status, statusText: response.statusText, headers }); }
+ if (!response.body) { timeout.clear(); return new Response(null, { status: response.status, statusText: response.statusText, headers }); }
  const reader = response.body.getReader();
  let closed = false;
- const cleanup = () => { if (!closed) { closed = true; clearTimeout(timer); } };
+ const cleanup = () => { if (!closed) { closed = true; timeout.clear(); } };
  const stream = new ReadableStream({
-  async pull(controller) { try { const result = await reader.read(); if (result.done) { cleanup(); controller.close(); } else controller.enqueue(result.value); } catch (cause) { cleanup(); controller.error(cause); } },
+  async pull(controller) { try { const result = await reader.read(); if (result.done) { cleanup(); controller.close(); } else { timeout.reset(); controller.enqueue(result.value); } } catch (cause) { cleanup(); controller.error(cause); } },
   async cancel(reason) { try { await reader.cancel(reason); } finally { cleanup(); } }
  });
  return new Response(stream, { status: response.status, statusText: response.statusText, headers });
@@ -58,18 +58,26 @@ async function handleChat(request, env) {
   let apiKey;
   try { apiKey = await decryptSecret(key.encryptedKey, env, key.id, Boolean(key.legacy)); }
   catch (cause) { console.error(JSON.stringify({ event: "provider_key_decrypt_failed", provider: "google", keyId: key.id, message: String(cause?.message || cause).slice(0, 160) })); continue; }
-  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), Math.max(1000, Math.min(120000, Number(env.PROVIDER_TIMEOUT_MS) || 45000)));
+  const controller = new AbortController();
+  // Bound upstream connection and idle-body time, not total stream lifetime.
+  const timeoutMs = Math.max(1000, Math.min(120000, Number(env.PROVIDER_TIMEOUT_MS) || 45000));
+  let timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = {
+   reset() { clearTimeout(timer); timer = setTimeout(() => controller.abort(), timeoutMs); },
+   clear() { clearTimeout(timer); }
+  };
   let response;
   try {
    response = await fetch(upstreamUrl, { method: "POST", headers: { "content-type": request.headers.get("content-type") || "application/json", authorization: `Bearer ${apiKey}`, accept: request.headers.get("accept") || (body.stream ? "text/event-stream" : "application/json") }, body: upstreamBody, signal: controller.signal, redirect: "manual" });
   } catch (cause) {
-   clearTimeout(timer);
+   timeout.clear();
    console.error(JSON.stringify({ event: "upstream_fetch_failed", provider: "google", model: body.model, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), errorName: cause?.name || "Error", message: String(cause?.message || cause).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 200) }));
    return error("Upstream connection failed; request was not retried to avoid duplicate usage.", "upstream_error", 502);
   }
   if (response.ok) {
    console.warn(JSON.stringify({ event: "upstream_response_received", provider: "google", model: body.model, status: response.status, contentType: response.headers.get("content-type") || "", streaming: body.stream === true, hasBody: Boolean(response.body), upstreamRequestId: response.headers.get("x-request-id") || response.headers.get("x-goog-request-id") || "" }));
-   return responseWithCleanup(response, body.model, timer);
+   timeout.reset();
+   return responseWithCleanup(response, body.model, timeout);
   }
   let detail = "";
   try { detail = await response.clone().text(); } catch {}
@@ -117,12 +125,13 @@ async function handleChat(request, env) {
    ...providerError
   }));
   if (isQuotaFailure(response.status, detail)) {
-   clearTimeout(timer);
+   timeout.clear();
    const cooldown = response.status === 429 ? retryAfterSeconds(response.headers.get("retry-after")) : 900;
    try { await setCooldown(env, key.id, cooldown); } catch { return error("Key rotation state unavailable.", "service_unavailable", 503); }
    continue;
   }
-  return responseWithCleanup(response, body.model, timer);
+  timeout.reset();
+  return responseWithCleanup(response, body.model, timeout);
  }
  const latest = parseRegistry(await redis(env, ["GET", REGISTRY_KEY]));
  const future = latest.keys.map(key => key.cooldownUntil || 0).filter(value => value > Date.now());
