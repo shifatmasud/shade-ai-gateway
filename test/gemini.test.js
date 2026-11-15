@@ -10,6 +10,11 @@ test("OpenAI tools and tool choice map to Gemini function declarations", () => {
   assert.deepEqual(request.toolConfig.functionCallingConfig, { mode: "ANY" });
 });
 
+test("Gemini 4 receives the selected reasoning effort", () => {
+  const request = toGeminiRequest({ model: "gemini-4-hydrogen", reasoning_effort: "medium", messages: [{ role: "user", content: "hello" }] });
+  assert.deepEqual(request.generationConfig.thinkingConfig, { thinkingLevel: "MEDIUM" });
+});
+
 test("assistant tool calls and tool results map to Gemini conversation parts", () => {
   const request = toGeminiRequest({ messages: [
     { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "get_weather", arguments: "{\"city\":\"Dhaka\"}" } }] },
