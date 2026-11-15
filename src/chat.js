@@ -62,8 +62,18 @@ async function handleChat(request, env) {
   if (response.ok) return responseWithCleanup(response, body.model, timer);
   let detail = "";
   try { detail = await response.clone().text(); } catch {}
-  const safeDetail = String(detail).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").replace(/\s+/g, " ").slice(0, 300);
-  console.error(JSON.stringify({ event: "upstream_http_error", provider: "google", model: body.model, status: response.status, statusText: response.statusText, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), contentType: response.headers.get("content-type") || "", retryAfter: response.headers.get("retry-after") || "", detail: safeDetail }));
+  let providerError = {};
+  try {
+   const payload = JSON.parse(detail);
+   const upstreamError = payload?.error || payload;
+   providerError = {
+    upstreamCode: typeof upstreamError?.code === "number" ? upstreamError.code : undefined,
+    upstreamStatus: typeof upstreamError?.status === "string" ? upstreamError.status.slice(0, 64) : undefined,
+    upstreamType: typeof upstreamError?.type === "string" ? upstreamError.type.slice(0, 64) : undefined,
+    reasons: Array.isArray(upstreamError?.details) ? upstreamError.details.map(item => item?.reason).filter(value => typeof value === "string").slice(0, 5) : undefined
+   };
+  } catch {}
+  console.error(JSON.stringify({ event: "upstream_http_error", provider: "google", model: body.model, status: response.status, statusText: response.statusText, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), upstreamRequestId: response.headers.get("x-request-id") || response.headers.get("x-goog-request-id") || "", contentType: response.headers.get("content-type") || "", retryAfter: response.headers.get("retry-after") || "", ...providerError }));
   if (isQuotaFailure(response.status, detail)) {
    clearTimeout(timer);
    const cooldown = response.status === 429 ? retryAfterSeconds(response.headers.get("retry-after")) : 900;
