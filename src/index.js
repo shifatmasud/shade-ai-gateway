@@ -47,8 +47,18 @@ function isQuotaFailure(status, text) {
 async function handleModels(request, env) {
     try {
         const reg = parseRegistry(await redis(env, ["GET", REGISTRY_KEY]));
-        const models = [...new Set(reg.keys.flatMap(key => (key.models || []).map(id => String(id).replace(/^models\//, ""))).filter(Boolean))];
-        return json({ object: "list", data: models.map(id => ({ id, object: "model", owned_by: "shade-google-pool" })) });
+        const models = new Map();
+        for (const key of reg.keys) {
+            for (const entry of Array.isArray(key.models) ? key.models : []) {
+                const model = typeof entry === "string"
+                    ? { id: entry.replace(/^models\//, ""), object: "model", owned_by: "google" }
+                    : entry && typeof entry === "object" && typeof entry.id === "string" ? entry : null;
+                if (!model?.id) continue;
+                const previous = models.get(model.id) || {};
+                models.set(model.id, { ...previous, ...model });
+            }
+        }
+        return json({ object: "list", data: [...models.values()] });
     }
     catch {
         return error("Model registry unavailable.", "service_unavailable", 503);
@@ -219,3 +229,4 @@ export default {
 };
 
 export { validateBaseUrl, parseRegistry, isQuotaFailure, retryAfterSeconds };
+[exit status 0]
