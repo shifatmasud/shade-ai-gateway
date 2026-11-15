@@ -109,7 +109,8 @@ async function handleChat(request, env) {
         try {
             apiKey = await decryptSecret(key.encryptedKey, env, key.id, Boolean(key.legacy));
         }
-        catch {
+        catch (cause) {
+            console.error(JSON.stringify({ event: "provider_key_decrypt_failed", provider: "google", keyId: key.id, message: String(cause?.message || cause).slice(0, 160) }));
             continue;
         }
         const controller = new AbortController();
@@ -119,8 +120,9 @@ async function handleChat(request, env) {
             await assertPublicHost(new URL(reg.baseUrl).hostname);
             response = await fetch(`${reg.baseUrl}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify(body), signal: controller.signal, redirect: "manual" });
         }
-        catch {
+        catch (cause) {
             clearTimeout(timer);
+            console.error(JSON.stringify({ event: "upstream_fetch_failed", provider: "google", model: body.model, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), errorName: cause?.name || "Error", message: String(cause?.message || cause).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 200) }));
             return error("Upstream connection failed; request was not retried to avoid duplicate usage.", "upstream_error", 502);
         }
         clearTimeout(timer);
@@ -140,6 +142,8 @@ async function handleChat(request, env) {
             detail = await response.clone().text();
         }
         catch { }
+        const safeDetail = String(detail).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").replace(/\s+/g, " ").slice(0, 300);
+        console.error(JSON.stringify({ event: "upstream_http_error", provider: "google", model: body.model, status: response.status, statusText: response.statusText, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), contentType: response.headers.get("content-type") || "", retryAfter: response.headers.get("retry-after") || "", detail: safeDetail }));
         if (isQuotaFailure(response.status, detail)) {
             const cooldown = response.status === 429 ? retryAfterSeconds(response.headers.get("retry-after")) : 900;
             try {
