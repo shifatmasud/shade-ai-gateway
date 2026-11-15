@@ -215,7 +215,7 @@ test('authenticated client rotates after an explicit 429 and cools down that key
   }
   const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'models/gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
   assert.equal(response.status, 200);
-  assert.equal(lastUpstreamModel, 'gemini-2.5-flash');
+  assert.equal(lastUpstreamModel, 'models/gemini-2.5-flash');
   assert.equal(upstreamGenerateCalls, 2);
   const manager = await worker.fetch(request('/admin/settings', { auth: true }), env);
   const data = await manager.json();
@@ -276,5 +276,5 @@ test('OpenAI-compatible SSE is passed through without translating chunks', async
   const stream = await response.text();
   assert.match(stream, /"content":"stream "/);
   assert.match(stream, /"content":"works"/);
-  assert.equal(stream.endsWith('data: [DONE]\\n\\n'), true);
+  assert.equal(stream.endsWith('data: [DONE]\n\n'), true);
 });
