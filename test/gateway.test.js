@@ -241,4 +241,3 @@ test('model listing requires client authentication and returns discovered models
   assert.deepEqual(flash.supportedGenerationMethods, ['generateContent', 'countTokens']);
   assert.equal(data.data[1].displayName, 'Gemini 2.5 Pro');
 });
-[exit status 0]
