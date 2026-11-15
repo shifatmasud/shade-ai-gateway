@@ -66,7 +66,7 @@ function makeEnv() {
     }
     if (url.hostname === 'generativelanguage.googleapis.com' && /:generateContent$/.test(url.pathname)) {
       upstreamGenerateCalls++;
-      lastUpstreamModel = url.pathname.match(/models\\/([^:]+)/)?.[1];
+      lastUpstreamModel = url.pathname.match(/models\/([^:]+)/)?.[1];
       assert.equal(new Headers(init.headers).get('x-goog-api-key')?.startsWith('google-test-secret-'), true);
       assert.equal(url.searchParams.has('key'), false);
       const nativeBody = JSON.parse(init.body);
