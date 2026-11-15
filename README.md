@@ -2,6 +2,8 @@
 
 An API-key-protected, OpenAI-compatible gateway for a private pool of Google AI Studio API keys.
 
+Chat completions are transparently proxied to Google's OpenAI-compatible Gemini API (`https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Shade forwards the original OpenAI request JSON and streams the upstream OpenAI-compatible response without translating message, tool-call, or SSE formats. Shade still handles client authentication, encrypted provider keys, key rotation, quota cooldowns, and model discovery.
+
 ## Client configuration
 
 Use one base URL in your app:
