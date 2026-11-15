@@ -229,4 +229,3 @@ export default {
 };
 
 export { validateBaseUrl, parseRegistry, isQuotaFailure, retryAfterSeconds };
-[exit status 0]
