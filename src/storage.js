@@ -372,4 +372,3 @@ async function setCooldown(env, id, seconds) {
 }
 
 export { REGISTRY_KEY, json, error, readLimited, bytesToBase64, digest, redis, parseRegistry, updateRegistry, assertPublicHost, decryptSecret, adminRoutes, setCooldown, validateBaseUrl };
-[exit status 0]
