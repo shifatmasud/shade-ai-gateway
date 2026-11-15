@@ -33,5 +33,5 @@ test("Gemini streaming function calls emit OpenAI tool-call deltas", async () =>
   assert.match(stream, /\"tool_calls\"/);
   assert.match(stream, /\"name\":\"get_weather\"/);
   assert.match(stream, /\"finish_reason\":\"tool_calls\"/);
-  assert.match(stream, /data: \\[DONE\\]/);
+  assert.ok(stream.includes("data: [DONE]"));
 });
