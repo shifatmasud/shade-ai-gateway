@@ -98,12 +98,25 @@ async function handleChat(request, env) {
  if (!body || !Array.isArray(body.messages) || typeof body.model !== "string" || !body.model.trim()) return error("Expected a model name and messages array.", "invalid_request_error", 400);
  const strippedFields = [];
  let upstreamBody = raw;
+ let forwarded = body;
  if (Object.prototype.hasOwnProperty.call(body, "prompt_cache_key")) {
-  const forwarded = { ...body };
+  forwarded = { ...forwarded };
   delete forwarded.prompt_cache_key;
-  upstreamBody = JSON.stringify(forwarded);
   strippedFields.push("prompt_cache_key");
  }
+ // Gemini's OpenAI-compat endpoint can reject an empty assistant content field
+ // when that same message carries tool_calls. Omit only that empty field.
+ if (Array.isArray(forwarded.messages) && forwarded.messages.some(message => message?.role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length && message.content === "")) {
+  if (forwarded === body) forwarded = { ...body };
+  forwarded.messages = forwarded.messages.map(message => {
+   if (message?.role !== "assistant" || !Array.isArray(message.tool_calls) || !message.tool_calls.length || message.content !== "") return message;
+   const normalized = { ...message };
+   delete normalized.content;
+   return normalized;
+  });
+  strippedFields.push("empty_assistant_tool_content");
+ }
+ if (forwarded !== body) upstreamBody = JSON.stringify(forwarded);
  let reg;
  try { reg = parseRegistry(await redis(env, ["GET", REGISTRY_KEY])); } catch { return error("Key storage unavailable.", "service_unavailable", 503); }
  if (!reg.keys.length) return error("No Google AI Studio keys are configured.", "provider_not_configured", 503);

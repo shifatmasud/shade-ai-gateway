@@ -72,7 +72,7 @@ function makeEnv() {
       lastUpstreamModel = sent.model;
       lastUpstreamBody = sent;
       assert.match(new Headers(init.headers).get('authorization') || '', /^Bearer google-test-secret-/);
-      assert.deepEqual(sent.messages, [{ role: 'user', content: 'hello' }]);
+      if (!sent.messages.some(message => message?.role === 'assistant' && Array.isArray(message.tool_calls))) assert.deepEqual(sent.messages, [{ role: 'user', content: 'hello' }]);
       if (upstreamMode === 'rotate' && upstreamGenerateCalls === 1) return new Response(JSON.stringify({ error: { message: 'RESOURCE_EXHAUSTED rate limit' } }), { status: 429, headers: { 'retry-after': '60', 'content-type': 'application/json' } });
       if (upstreamMode === 'ambiguous') return new Response(JSON.stringify({ error: { message: 'server error' } }), { status: 500 });
       if (upstreamMode === 'tool-call') return Response.json({ id: 'chatcmpl_tool', object: 'chat.completion', model: sent.model, choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":[\"capability\"]}' } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } });
@@ -303,6 +303,23 @@ test('non-stream tool calls and tool definitions pass through the gateway unchan
   assert.equal(data.choices[0].finish_reason, 'tool_calls');
   assert.equal(data.choices[0].message.tool_calls[0].function.name, 'capability');
   assert.deepEqual(JSON.parse(data.choices[0].message.tool_calls[0].function.arguments), { names: ['capability'] });
+});
+
+test('removes empty assistant content from tool-call continuation history', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  upstreamMode = 'success';
+  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
+  const messages = [
+    { role: 'user', content: 'Check my latest Notion pages' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":[\"capability\"]}' } }] },
+    { role: 'tool', tool_call_id: 'call_capability', name: 'capability', content: '{\"tools\":[\"notion_search\"]}' }
+  ];
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-3.5-flash-lite', messages } }), env);
+  assert.equal(response.status, 200);
+  assert.equal(Object.hasOwn(lastUpstreamBody.messages[1], 'content'), false);
+  assert.deepEqual(lastUpstreamBody.messages[1].tool_calls, messages[1].tool_calls);
+  assert.deepEqual(lastUpstreamBody.messages[2], messages[2]);
 });
 
 test('streaming tool calls normalize Gemini stop to OpenAI tool_calls finish reason', async () => {
