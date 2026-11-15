@@ -70,6 +70,7 @@ async function handleChat(request, env) {
     upstreamCode: typeof upstreamError?.code === "number" ? upstreamError.code : undefined,
     upstreamStatus: typeof upstreamError?.status === "string" ? upstreamError.status.slice(0, 64) : undefined,
     upstreamType: typeof upstreamError?.type === "string" ? upstreamError.type.slice(0, 64) : undefined,
+    errorMessage: typeof upstreamError?.message === "string" && /(invalid|unsupported|not supported|unrecognized|unknown field|missing|required|permission|api key|quota|rate.?limit|model)/i.test(upstreamError.message) ? upstreamError.message.replace(/["'][^"']{1,80}["']/g, "[value]").replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 180) : undefined,
     reasons: Array.isArray(upstreamError?.details) ? upstreamError.details.map(item => item?.reason).filter(value => typeof value === "string").slice(0, 5) : undefined
    };
   } catch {}
