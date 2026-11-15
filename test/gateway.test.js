@@ -274,10 +274,10 @@ test('native Gemini SSE is translated to OpenAI SSE chunks', async () => {
   await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', stream: true, messages: [{ role: 'user', content: 'hello' }] } }), env);
   assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-type'), /text\\/event-stream/);
+  assert.equal(response.headers.get('content-type').startsWith('text/event-stream'), true);
   const stream = await response.text();
   assert.match(stream, /"content":"stream "/);
   assert.match(stream, /"content":"works"/);
   assert.match(stream, /"finish_reason":"stop"/);
-  assert.match(stream, /data: \\[DONE\\]/);
+  assert.equal(stream.includes('data: [DONE]'), true);
 });
