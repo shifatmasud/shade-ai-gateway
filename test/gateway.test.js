@@ -55,8 +55,14 @@ function makeEnv() {
         ? { Status: 0, Answer: [{ type: 1, data: '142.250.72.234' }] }
         : { Status: 3, Answer: [] });
     }
+    if (url.hostname === 'generativelanguage.googleapis.com' && url.pathname === '/v1beta/models') {
+      if (url.searchParams.get('pageToken') === 'next') {
+        return Response.json({ models: [{ name: 'models/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', supportedGenerationMethods: ['generateContent'] }] });
+      }
+      return Response.json({ models: [{ name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', description: 'Fast model', inputTokenLimit: 1048576, outputTokenLimit: 65536, supportedGenerationMethods: ['generateContent', 'countTokens'] }], nextPageToken: 'next' });
+    }
     if (url.hostname === 'generativelanguage.googleapis.com' && url.pathname.endsWith('/models')) {
-      return Response.json({ data: [{ id: 'gemini-2.5-flash' }, { id: 'gemini-2.5-pro' }] });
+      return Response.json({ object: 'list', data: [{ id: 'gemini-2.5-flash', created: 1750000000, owned_by: 'google' }, { id: 'gemini-2.5-pro', owned_by: 'google' }] });
     }
     if (url.hostname === 'generativelanguage.googleapis.com' && url.pathname.endsWith('/chat/completions')) {
       upstreamChatCalls++;
@@ -228,4 +234,11 @@ test('model listing requires client authentication and returns discovered models
   assert.equal(response.status, 200);
   const data = await response.json();
   assert.deepEqual(data.data.map(item => item.id), ['gemini-2.5-flash', 'gemini-2.5-pro']);
+  const flash = data.data[0];
+  assert.equal(flash.displayName, 'Gemini 2.5 Flash');
+  assert.equal(flash.description, 'Fast model');
+  assert.equal(flash.inputTokenLimit, 1048576);
+  assert.deepEqual(flash.supportedGenerationMethods, ['generateContent', 'countTokens']);
+  assert.equal(data.data[1].displayName, 'Gemini 2.5 Pro');
 });
+[exit status 0]
