@@ -35,6 +35,14 @@ async function handleChat(request, env) {
  try { raw = await readLimited(request, MAX_BODY_BYTES); if (raw === null) return error("Request body too large.", "invalid_request_error", 413); body = JSON.parse(raw); }
  catch { return error("Request body must be valid JSON.", "invalid_request_error", 400); }
  if (!body || !Array.isArray(body.messages) || typeof body.model !== "string" || !body.model.trim()) return error("Expected a model name and messages array.", "invalid_request_error", 400);
+ const strippedFields = [];
+ let upstreamBody = raw;
+ if (Object.prototype.hasOwnProperty.call(body, "prompt_cache_key")) {
+  const forwarded = { ...body };
+  delete forwarded.prompt_cache_key;
+  upstreamBody = JSON.stringify(forwarded);
+  strippedFields.push("prompt_cache_key");
+ }
  let reg;
  try { reg = parseRegistry(await redis(env, ["GET", REGISTRY_KEY])); } catch { return error("Key storage unavailable.", "service_unavailable", 503); }
  if (!reg.keys.length) return error("No Google AI Studio keys are configured.", "provider_not_configured", 503);
@@ -53,7 +61,7 @@ async function handleChat(request, env) {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), Math.max(1000, Math.min(120000, Number(env.PROVIDER_TIMEOUT_MS) || 45000)));
   let response;
   try {
-   response = await fetch(upstreamUrl, { method: "POST", headers: { "content-type": request.headers.get("content-type") || "application/json", authorization: `Bearer ${apiKey}`, accept: request.headers.get("accept") || (body.stream ? "text/event-stream" : "application/json") }, body: raw, signal: controller.signal, redirect: "manual" });
+   response = await fetch(upstreamUrl, { method: "POST", headers: { "content-type": request.headers.get("content-type") || "application/json", authorization: `Bearer ${apiKey}`, accept: request.headers.get("accept") || (body.stream ? "text/event-stream" : "application/json") }, body: upstreamBody, signal: controller.signal, redirect: "manual" });
   } catch (cause) {
    clearTimeout(timer);
    console.error(JSON.stringify({ event: "upstream_fetch_failed", provider: "google", model: body.model, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), errorName: cause?.name || "Error", message: String(cause?.message || cause).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 200) }));
@@ -96,7 +104,7 @@ async function handleChat(request, env) {
    messageRoles: body.messages.map(message => message?.role).filter(value => typeof value === "string").slice(0, 24),
    toolCount: Array.isArray(body.tools) ? body.tools.length : 0,
    toolNames: Array.isArray(body.tools) ? body.tools.map(tool => tool?.function?.name).filter(value => typeof value === "string").slice(0, 24) : [],
-   requestKeys: Object.keys(body).sort().slice(0, 48),
+   requestKeys: Object.keys(body).sort().slice(0, 48), strippedFields,
    firstToolKeys: body.tools?.[0] && typeof body.tools[0] === "object" ? Object.keys(body.tools[0]).slice(0, 24) : [],
    firstToolFunctionKeys: body.tools?.[0]?.function && typeof body.tools[0].function === "object" ? Object.keys(body.tools[0].function).slice(0, 24) : [],
    firstToolSchemaKeys: body.tools?.[0]?.function?.parameters && typeof body.tools[0].function.parameters === "object" ? Object.keys(body.tools[0].function.parameters).slice(0, 24) : [],
