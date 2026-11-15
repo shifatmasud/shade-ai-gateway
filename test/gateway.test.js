@@ -64,23 +64,19 @@ function makeEnv() {
     if (url.hostname === 'generativelanguage.googleapis.com' && url.pathname.endsWith('/models')) {
       return Response.json({ object: 'list', data: [{ id: 'gemini-2.5-flash', created: 1750000000, owned_by: 'google' }, { id: 'gemini-2.5-pro', owned_by: 'google' }] });
     }
-    if (url.hostname === 'generativelanguage.googleapis.com' && /:generateContent$/.test(url.pathname)) {
+    if (url.hostname === 'generativelanguage.googleapis.com' && url.pathname === '/v1beta/openai/chat/completions') {
       upstreamGenerateCalls++;
-      lastUpstreamModel = url.pathname.match(/models\/([^:]+)/)?.[1];
-      assert.equal(new Headers(init.headers).get('x-goog-api-key')?.startsWith('google-test-secret-'), true);
-      assert.equal(url.searchParams.has('key'), false);
-      const nativeBody = JSON.parse(init.body);
-      assert.equal(nativeBody.contents[0].parts[0].text, 'hello');
+      const sent = JSON.parse(init.body);
+      lastUpstreamModel = sent.model;
+      assert.match(new Headers(init.headers).get('authorization') || '', /^Bearer google-test-secret-/);
+      assert.deepEqual(sent.messages, [{ role: 'user', content: 'hello' }]);
       if (upstreamMode === 'rotate' && upstreamGenerateCalls === 1) return new Response(JSON.stringify({ error: { message: 'RESOURCE_EXHAUSTED rate limit' } }), { status: 429, headers: { 'retry-after': '60', 'content-type': 'application/json' } });
       if (upstreamMode === 'ambiguous') return new Response(JSON.stringify({ error: { message: 'server error' } }), { status: 500 });
-      return Response.json({ responseId: 'gemini-response-test', candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 1, totalTokenCount: 3 } });
-    }
-    if (url.hostname === 'generativelanguage.googleapis.com' && /:streamGenerateContent$/.test(url.pathname)) {
-      const events = [
-        'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'stream ' }] } }] }) + '\n\n',
-        'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'works' }] }, finishReason: 'STOP' }] }) + '\n\n'
-      ].join('');
-      return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
+      if (sent.stream) {
+        const events = ['data: ' + JSON.stringify({ id: 'chatcmpl_test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'stream ' }, finish_reason: null }] }) + '\n\n', 'data: ' + JSON.stringify({ id: 'chatcmpl_test', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { content: 'works' }, finish_reason: 'stop' }] }) + '\n\n', 'data: [DONE]\n\n'].join('');
+        return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
+      }
+      return Response.json({ id: 'chatcmpl_test', object: 'chat.completion', model: sent.model, choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }], usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 } });
     }
     throw new Error(`Unexpected fetch: ${url}`);
   };
@@ -233,7 +229,7 @@ test('ambiguous upstream 5xx is not retried', async () => {
   assert.equal(added.status, 201);
   upstreamMode = 'ambiguous';
   const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'hello' }] } }), env);
-  assert.equal(response.status, 502);
+  assert.equal(response.status, 500);
   assert.equal(upstreamGenerateCalls, 1);
 });
 
@@ -254,22 +250,22 @@ test('model listing requires client authentication and returns discovered models
 });
 
 
-test('native Gemini response is translated to OpenAI chat completion shape', async () => {
+test('chat completion request is forwarded unchanged to the Gemini OpenAI-compatible endpoint', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
   upstreamMode = 'success';
   await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
-  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', messages: [{ role: 'user', content: 'hello' }], max_tokens: 20 } }), env);
+  const sent = { model: 'gemini-4-hydrogen', messages: [{ role: 'user', content: 'hello' }], temperature: 0.2, max_tokens: 20, tools: [{ type: 'function', function: { name: 'tool_describe', parameters: { type: 'object' } } }] };
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: sent }), env);
   assert.equal(response.status, 200);
   const data = await response.json();
   assert.equal(data.object, 'chat.completion');
-  assert.equal(data.model, 'gemini-4-hydrogen');
   assert.equal(data.choices[0].message.content, 'ok');
   assert.equal(data.usage.total_tokens, 3);
   assert.equal(upstreamGenerateCalls, 1);
 });
 
-test('native Gemini SSE is translated to OpenAI SSE chunks', async () => {
+test('OpenAI-compatible SSE is passed through without translating chunks', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
   upstreamMode = 'success';
@@ -280,6 +276,5 @@ test('native Gemini SSE is translated to OpenAI SSE chunks', async () => {
   const stream = await response.text();
   assert.match(stream, /"content":"stream "/);
   assert.match(stream, /"content":"works"/);
-  assert.match(stream, /"finish_reason":"stop"/);
-  assert.equal(stream.includes('data: [DONE]'), true);
+  assert.equal(stream.endsWith('data: [DONE]\\n\\n'), true);
 });
