@@ -75,7 +75,62 @@ function toGeminiRequest(body) {
  const out={contents};if(systemText)out.systemInstruction={parts:[{text:systemText}]};if(Object.keys(generationConfig).length)out.generationConfig=generationConfig;return out;
 }
 function fromGeminiResponse(payload,model){const c=payload?.candidates?.[0];const text=(c?.content?.parts||[]).map(p=>p.text||"").join("");const prompt=payload?.usageMetadata?.promptTokenCount||0;const completion=payload?.usageMetadata?.candidatesTokenCount||0;return{id:"chatcmpl-"+(payload?.responseId||crypto.randomUUID().replace(/-/g,"")),object:"chat.completion",created:Math.floor(Date.now()/1000),model,choices:[{index:0,message:{role:"assistant",content:text},finish_reason:c?.finishReason==="MAX_TOKENS"?"length":"stop"}],usage:{prompt_tokens:prompt,completion_tokens:completion,total_tokens:prompt+completion}};}
-async function geminiStreamAsOpenAI(response,model){const raw=await response.text();const id="chatcmpl-"+crypto.randomUUID().replace(/-/g,"");const chunks=[];for(const line of raw.split("\n")){if(!line.startsWith("data:"))continue;const data=line.slice(5).trim();if(!data||data==="[DONE]")continue;try{const p=JSON.parse(data);const c=p?.candidates?.[0];const content=(c?.content?.parts||[]).map(x=>x.text||"").join("");if(content)chunks.push({id,object:"chat.completion.chunk",created:Math.floor(Date.now()/1000),model,choices:[{index:0,delta:{content},finish_reason:null}]});if(c?.finishReason)chunks.push({id,object:"chat.completion.chunk",created:Math.floor(Date.now()/1000),model,choices:[{index:0,delta:{},finish_reason:c.finishReason==="MAX_TOKENS"?"length":"stop"}]});}catch{}}return new Response(chunks.map(x=>"data: "+JSON.stringify(x)+"\n\n").join("")+"data: [DONE]\n\n",{headers:{"content-type":"text/event-stream; charset=utf-8"}});}
+function geminiStreamAsOpenAI(response, model, onDone) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    const id = "chatcmpl-" + crypto.randomUUID().replace(/-/g, "");
+    const created = Math.floor(Date.now() / 1000);
+    let buffer = "";
+    let closed = false;
+    function translateLine(line, controller) {
+        if (!line.startsWith("data:")) return;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") return;
+        let payload;
+        try { payload = JSON.parse(data); } catch { return; }
+        const candidate = payload?.candidates?.[0];
+        const text = (candidate?.content?.parts || []).map(part => part.text || "").join("");
+        if (text) {
+            const chunk = { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { content: text }, finish_reason: null }] };
+            controller.enqueue(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+        }
+        if (candidate?.finishReason) {
+            const chunk = { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: {}, finish_reason: candidate.finishReason === "MAX_TOKENS" ? "length" : "stop" }] };
+            controller.enqueue(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+        }
+    }
+    return new Response(new ReadableStream({
+        async pull(controller) {
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        buffer += decoder.decode();
+                        if (buffer.trim()) translateLine(buffer.trim(), controller);
+                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                        controller.close();
+                        if (!closed) { closed = true; onDone?.(); }
+                        return;
+                    }
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split(/\r?\n/);
+                    buffer = lines.pop() || "";
+                    for (const line of lines) translateLine(line, controller);
+                    if (lines.length) return;
+                }
+            } catch (cause) {
+                controller.error(cause);
+                if (!closed) { closed = true; onDone?.(); }
+            }
+        },
+        async cancel() {
+            try { await reader.cancel(); } finally {
+                if (!closed) { closed = true; onDone?.(); }
+            }
+        }
+    }), { status: 200, headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+}
 
 async function handleChat(request, env) {
     if (Number(request.headers.get("content-length") || 0) > MAX_BODY_BYTES)
@@ -130,19 +185,20 @@ async function handleChat(request, env) {
         let response;
         try {
             await assertPublicHost(new URL(reg.baseUrl).hostname);
-            const nativeUrl = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(body.model)}:${body.stream ? "streamGenerateContent?alt=sse" : "generateContent"}`); nativeUrl.searchParams.set("key", apiKey); response = await fetch(nativeUrl.toString(), { method: "POST", headers: { "content-type": "application/json", accept: body.stream ? "text/event-stream" : "application/json" }, body: JSON.stringify(toGeminiRequest(body)), signal: controller.signal, redirect: "manual" });
+            const nativeUrl = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(body.model)}:${body.stream ? "streamGenerateContent?alt=sse" : "generateContent"}`); response = await fetch(nativeUrl.toString(), { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": apiKey, accept: body.stream ? "text/event-stream" : "application/json" }, body: JSON.stringify(toGeminiRequest(body)), signal: controller.signal, redirect: "manual" });
         }
         catch (cause) {
             clearTimeout(timer);
             console.error(JSON.stringify({ event: "upstream_fetch_failed", provider: "google", model: body.model, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), errorName: cause?.name || "Error", message: String(cause?.message || cause).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 200) }));
             return error("Upstream connection failed; request was not retried to avoid duplicate usage.", "upstream_error", 502);
         }
-        clearTimeout(timer);
         if (response.ok && response.body) {
-            if (body.stream) { const translated = await geminiStreamAsOpenAI(response, body.model); return new Response(translated.body, { status: 200, headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-ai-gateway-model": body.model } }); }
+            if (body.stream) { const translated = geminiStreamAsOpenAI(response, body.model, () => clearTimeout(timer)); return new Response(translated.body, { status: 200, headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-ai-gateway-model": body.model } }); }
+            clearTimeout(timer);
             const payload = await response.json();
             return json(fromGeminiResponse(payload, body.model), 200, { "x-ai-gateway-model": body.model, "cache-control": "no-store" });
         }
+        clearTimeout(timer);
         let detail = "";
         try {
             detail = await response.clone().text();
