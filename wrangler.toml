@@ -15,3 +15,14 @@ ALLOWED_ORIGINS = "*"
 [previews.vars]
 PROVIDER_TIMEOUT_MS = "45000"
 ALLOWED_ORIGINS = "*"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+persist = true
+head_sampling_rate = 1
+redact_query_string = true
