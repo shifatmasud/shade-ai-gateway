@@ -65,12 +65,17 @@ async function handleChat(request, env) {
   let providerError = {};
   try {
    const payload = JSON.parse(detail);
-   const upstreamError = payload?.error || payload;
-   const providerMessage = typeof upstreamError?.message === "string" ? upstreamError.message : typeof payload?.message === "string" ? payload.message : "";
+   const root = Array.isArray(payload) ? payload[0] : payload;
+   const upstreamError = root?.error || root;
+   const providerMessage = typeof upstreamError?.message === "string" ? upstreamError.message : typeof root?.message === "string" ? root.message : "";
    providerError = {
+    bodyFormat: "json",
+    payloadType: Array.isArray(payload) ? "array" : typeof payload,
+    payloadLength: Array.isArray(payload) ? payload.length : undefined,
     payloadKeys: payload && typeof payload === "object" ? Object.keys(payload).slice(0, 12) : [],
+    rootKeys: root && typeof root === "object" ? Object.keys(root).slice(0, 12) : [],
     errorKeys: upstreamError && typeof upstreamError === "object" ? Object.keys(upstreamError).slice(0, 12) : [],
-    errorFieldType: typeof payload?.error,
+    errorFieldType: typeof root?.error,
     messagePresent: Boolean(providerMessage),
     upstreamCode: ["number", "string"].includes(typeof upstreamError?.code) ? String(upstreamError.code).slice(0, 64) : undefined,
     upstreamStatus: ["number", "string"].includes(typeof upstreamError?.status) ? String(upstreamError.status).slice(0, 64) : undefined,
@@ -79,7 +84,9 @@ async function handleChat(request, env) {
     errorMessage: providerMessage && /(invalid|unsupported|not supported|unrecognized|unknown field|missing|required|permission|api key|quota|rate.?limit|model|tool|function|schema|reasoning|thinking)/i.test(providerMessage) ? providerMessage.replace(/["'][^"']{1,80}["']/g, "[value]").replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 180) : undefined,
     reasons: Array.isArray(upstreamError?.details) ? upstreamError.details.map(item => item?.reason).filter(value => typeof value === "string").slice(0, 5) : undefined
    };
-  } catch {}
+  } catch {
+   providerError = { bodyFormat: "text", bodyLength: detail.length, bodyClass: /bad request/i.test(detail) ? "bad_request" : /invalid/i.test(detail) ? "invalid_request" : "unclassified" };
+  }
   console.error(JSON.stringify({ event: "upstream_http_error", provider: "google", model: body.model, status: response.status, statusText: response.statusText, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), upstreamRequestId: response.headers.get("x-request-id") || response.headers.get("x-goog-request-id") || "", contentType: response.headers.get("content-type") || "", retryAfter: response.headers.get("retry-after") || "", ...providerError }));
   if (isQuotaFailure(response.status, detail)) {
    clearTimeout(timer);
