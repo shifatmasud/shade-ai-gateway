@@ -67,7 +67,10 @@ async function handleChat(request, env) {
    console.error(JSON.stringify({ event: "upstream_fetch_failed", provider: "google", model: body.model, requestId: request.headers.get("cf-ray") || crypto.randomUUID(), errorName: cause?.name || "Error", message: String(cause?.message || cause).replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 200) }));
    return error("Upstream connection failed; request was not retried to avoid duplicate usage.", "upstream_error", 502);
   }
-  if (response.ok) return responseWithCleanup(response, body.model, timer);
+  if (response.ok) {
+   console.warn(JSON.stringify({ event: "upstream_response_received", provider: "google", model: body.model, status: response.status, contentType: response.headers.get("content-type") || "", streaming: body.stream === true, hasBody: Boolean(response.body), upstreamRequestId: response.headers.get("x-request-id") || response.headers.get("x-goog-request-id") || "" }));
+   return responseWithCleanup(response, body.model, timer);
+  }
   let detail = "";
   try { detail = await response.clone().text(); } catch {}
   let providerError = {};
