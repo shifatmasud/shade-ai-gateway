@@ -1,67 +1,30 @@
-function toGeminiRequest(body) {
- const contents=[]; let systemText="";
- for(const m of body.messages){const role=m.role==="assistant"?"model":"user";const items=Array.isArray(m.content)?m.content:[{type:"text",text:String(m.content??"")}];const parts=[];
- for(const item of items){if(typeof item==="string")parts.push({text:item});else if(item?.type==="text"&&typeof item.text==="string")parts.push({text:item.text});else if(item?.type==="image_url"&&item.image_url?.url?.startsWith("data:")){const match=item.image_url.url.match(/^data:([^;,]+);base64,(.+)$/);if(match)parts.push({inline_data:{mime_type:match[1],data:match[2]}});}}
- if(m.role==="system"||m.role==="developer")systemText+=(systemText?"\n\n":"")+parts.map(p=>p.text||"").join("");else if(parts.length){const prev=contents[contents.length-1];if(prev?.role===role)prev.parts.push(...parts);else contents.push({role,parts});}}
+const schema=s=>{if(!s||typeof s!=="object"||Array.isArray(s))return{type:"OBJECT"};const o={},t=String(s.type||"object").toUpperCase();if(["STRING","NUMBER","INTEGER","BOOLEAN","ARRAY","OBJECT"].includes(t))o.type=t;for(const k of ["description","enum","required","minimum","maximum"])if(s[k]!==undefined)o[k]=s[k];if(s.items)o.items=schema(s.items);if(s.properties)o.properties=Object.fromEntries(Object.entries(s.properties).map(([k,v])=>[k,schema(v)]));return o};
+function toGeminiRequest(body){
+ const contents=[],names=new Map();for(const m of body.messages)if(m.role==="assistant")for(const c of m.tool_calls||[])if(c.id&&c.function?.name)names.set(c.id,c.function.name);
+ let systemText="";
+ for(const m of body.messages){const role=m.role==="assistant"?"model":"user",parts=[],items=Array.isArray(m.content)?m.content:[{type:"text",text:String(m.content??"")}];
+  for(const x of items){if(typeof x==="string")parts.push({text:x});else if(x?.type==="text"&&typeof x.text==="string")parts.push({text:x.text});else if(x?.type==="image_url"&&x.image_url?.url?.startsWith("data:")){const z=x.image_url.url.match(/^data:([^;,]+);base64,(.+)$/);if(z)parts.push({inline_data:{mime_type:z[1],data:z[2]}})}}
+  if(m.role==="system"||m.role==="developer"){systemText+=(systemText?"\n\n":"")+parts.map(p=>p.text||"").join("");continue}
+  if(m.role==="tool"){let result={};try{result=typeof m.content==="string"?JSON.parse(m.content):(m.content||{})}catch{result={result:String(m.content??"")}}const name=m.name||names.get(m.tool_call_id);if(name)parts.push({functionResponse:{name,response:result&&typeof result==="object"?result:{result}}})}
+  else if(m.role==="assistant")for(const c of m.tool_calls||[]){if(!c.function?.name)continue;let args={};try{args=JSON.parse(c.function.arguments||"{}")}catch{args={raw:c.function.arguments||""}}parts.push({functionCall:{name:c.function.name,args}})}
+  if(parts.length){const p=contents.at(-1);if(p?.role===role)p.parts.push(...parts);else contents.push({role,parts})}
+ }
  const generationConfig={};if(Number.isFinite(body.temperature))generationConfig.temperature=body.temperature;if(Number.isFinite(body.top_p))generationConfig.topP=body.top_p;if(Number.isInteger(body.max_tokens))generationConfig.maxOutputTokens=body.max_tokens;if(Number.isInteger(body.max_completion_tokens))generationConfig.maxOutputTokens=body.max_completion_tokens;if(Array.isArray(body.stop))generationConfig.stopSequences=body.stop;
- const out={contents};if(systemText)out.systemInstruction={parts:[{text:systemText}]};if(Object.keys(generationConfig).length)out.generationConfig=generationConfig;return out;
+ const out={contents};if(systemText)out.systemInstruction={parts:[{text:systemText}]};if(Object.keys(generationConfig).length)out.generationConfig=generationConfig;
+ const functions=(body.tools||[]).filter(t=>t?.type==="function"&&t.function?.name).map(t=>({name:t.function.name,...(t.function.description?{description:t.function.description}:{}),parameters:schema(t.function.parameters||{type:"object",properties:{}})}));if(functions.length)out.tools=[{functionDeclarations:functions}];
+ const choice=body.tool_choice;if(choice==="none")out.toolConfig={functionCallingConfig:{mode:"NONE"}};else if(choice==="required")out.toolConfig={functionCallingConfig:{mode:"ANY"}};else if(choice?.function?.name)out.toolConfig={functionCallingConfig:{mode:"ANY",allowedFunctionNames:[choice.function.name]}};
+ return out
 }
-function fromGeminiResponse(payload,model){const c=payload?.candidates?.[0];const text=(c?.content?.parts||[]).map(p=>p.text||"").join("");const prompt=payload?.usageMetadata?.promptTokenCount||0;const completion=payload?.usageMetadata?.candidatesTokenCount||0;return{id:"chatcmpl-"+(payload?.responseId||crypto.randomUUID().replace(/-/g,"")),object:"chat.completion",created:Math.floor(Date.now()/1000),model,choices:[{index:0,message:{role:"assistant",content:text},finish_reason:c?.finishReason==="MAX_TOKENS"?"length":"stop"}],usage:{prompt_tokens:prompt,completion_tokens:completion,total_tokens:prompt+completion}};}
-function geminiStreamAsOpenAI(response, model, onDone) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const encoder = new TextEncoder();
-    const id = "chatcmpl-" + crypto.randomUUID().replace(/-/g, "");
-    const created = Math.floor(Date.now() / 1000);
-    let buffer = "";
-    let closed = false;
-    function translateLine(line, controller) {
-        if (!line.startsWith("data:")) return;
-        const data = line.slice(5).trim();
-        if (!data || data === "[DONE]") return;
-        let payload;
-        try { payload = JSON.parse(data); } catch { return; }
-        const candidate = payload?.candidates?.[0];
-        const text = (candidate?.content?.parts || []).map(part => part.text || "").join("");
-        if (text) {
-            const chunk = { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { content: text }, finish_reason: null }] };
-            controller.enqueue(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
-        }
-        if (candidate?.finishReason) {
-            const chunk = { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: {}, finish_reason: candidate.finishReason === "MAX_TOKENS" ? "length" : "stop" }] };
-            controller.enqueue(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
-        }
-    }
-    return new Response(new ReadableStream({
-        async pull(controller) {
-            try {
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) {
-                        buffer += decoder.decode();
-                        if (buffer.trim()) translateLine(buffer.trim(), controller);
-                        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-                        controller.close();
-                        if (!closed) { closed = true; onDone?.(); }
-                        return;
-                    }
-                    buffer += decoder.decode(value, { stream: true });
-                    const lines = buffer.split(/\r?\n/);
-                    buffer = lines.pop() || "";
-                    for (const line of lines) translateLine(line, controller);
-                    if (lines.length) return;
-                }
-            } catch (cause) {
-                controller.error(cause);
-                if (!closed) { closed = true; onDone?.(); }
-            }
-        },
-        async cancel() {
-            try { await reader.cancel(); } finally {
-                if (!closed) { closed = true; onDone?.(); }
-            }
-        }
-    }), { status: 200, headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+function fromGeminiResponse(payload,model){
+ const c=payload?.candidates?.[0],parts=c?.content?.parts||[],text=parts.map(p=>p.text||"").join("");
+ const tool_calls=parts.filter(p=>p.functionCall?.name).map(p=>({id:"call_"+crypto.randomUUID().replace(/-/g,""),type:"function",function:{name:p.functionCall.name,arguments:JSON.stringify(p.functionCall.args||{})}}));
+ const prompt=payload?.usageMetadata?.promptTokenCount||0,completion=payload?.usageMetadata?.candidatesTokenCount||0;
+ return{id:"chatcmpl-"+(payload?.responseId||crypto.randomUUID().replace(/-/g,"")),object:"chat.completion",created:Math.floor(Date.now()/1000),model,choices:[{index:0,message:{role:"assistant",content:text||null,...(tool_calls.length?{tool_calls}:{})},finish_reason:tool_calls.length?"tool_calls":c?.finishReason==="MAX_TOKENS"?"length":"stop"}],usage:{prompt_tokens:prompt,completion_tokens:completion,total_tokens:prompt+completion}}
 }
-
-export { toGeminiRequest, fromGeminiResponse, geminiStreamAsOpenAI };
+function geminiStreamAsOpenAI(response,model,onDone){
+ const reader=response.body.getReader(),decoder=new TextDecoder(),encoder=new TextEncoder(),id="chatcmpl-"+crypto.randomUUID().replace(/-/g,""),created=Math.floor(Date.now()/1000),indexes=new Map();let next=0,hasTools=false,buffer="",closed=false;
+ const emit=(ctl,delta,finish_reason=null)=>ctl.enqueue(encoder.encode("data: "+JSON.stringify({id,object:"chat.completion.chunk",created,model,choices:[{index:0,delta,finish_reason}]})+"\n\n"));
+ function line(v,ctl){if(!v.startsWith("data:"))return;const d=v.slice(5).trim();if(!d||d==="[DONE]")return;let p;try{p=JSON.parse(d)}catch{return}const c=p?.candidates?.[0];for(const part of c?.content?.parts||[]){if(part.text)emit(ctl,{content:part.text});if(part.functionCall?.name){hasTools=true;const n=part.functionCall.name;let i=indexes.get(n),first=i===undefined;if(first){i=next++;indexes.set(n,i)}const call={index:i,function:{arguments:JSON.stringify(part.functionCall.args||{})}};if(first){call.id="call_"+crypto.randomUUID().replace(/-/g,"");call.type="function";call.function.name=n}emit(ctl,{tool_calls:[call]})}}if(c?.finishReason)emit(ctl,{},hasTools?"tool_calls":c.finishReason==="MAX_TOKENS"?"length":"stop")}
+ return new Response(new ReadableStream({async pull(ctl){try{while(true){const{value,done}=await reader.read();if(done){buffer+=decoder.decode();if(buffer.trim())line(buffer.trim(),ctl);ctl.enqueue(encoder.encode("data: [DONE]\n\n"));ctl.close();if(!closed){closed=true;onDone?.()}return}buffer+=decoder.decode(value,{stream:true});const lines=buffer.split(/\r?\n/);buffer=lines.pop()||"";for(const v of lines)line(v,ctl);if(lines.length)return}}catch(e){ctl.error(e);if(!closed){closed=true;onDone?.()}}},async cancel(){try{await reader.cancel()}finally{if(!closed){closed=true;onDone?.()}}}}),{status:200,headers:{"content-type":"text/event-stream; charset=utf-8","cache-control":"no-cache"}})
+}
+export{toGeminiRequest,fromGeminiResponse,geminiStreamAsOpenAI};
