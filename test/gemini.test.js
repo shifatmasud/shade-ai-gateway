@@ -30,8 +30,18 @@ test("Gemini streaming function calls emit OpenAI tool-call deltas", async () =>
   const payload = { candidates: [{ content: { parts: [{ functionCall: { name: "get_weather", args: { city: "Dhaka" } } }] }, finishReason: "STOP" }] };
   const upstream = new Response("data: " + JSON.stringify(payload) + "\n\n", { headers: { "content-type": "text/event-stream" } });
   const stream = await geminiStreamAsOpenAI(upstream, "gemini-4-hydrogen").text();
-  assert.match(stream, /\"tool_calls\"/);
-  assert.match(stream, /\"name\":\"get_weather\"/);
-  assert.match(stream, /\"finish_reason\":\"tool_calls\"/);
+  assert.match(stream, /"tool_calls"/);
+  assert.match(stream, /"name":"get_weather"/);
+  assert.match(stream, /"finish_reason":"tool_calls"/);
   assert.ok(stream.includes("data: [DONE]"));
+});
+
+test("Gemini tool-call stream closes on finishReason even if upstream stays open", async () => {
+  const payload = { candidates: [{ content: { parts: [{ functionCall: { name: "tool_describe", args: { names: ["mcp:upsy"], query: "upsy_browser_navigate" } } }] }, finishReason: "STOP" }] };
+  const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("data: " + JSON.stringify(payload) + "\n\n")); } });
+  const upstream = new Response(body, { headers: { "content-type": "text/event-stream" } });
+  const stream = await geminiStreamAsOpenAI(upstream, "gemini-4-hydrogen").text();
+  assert.match(stream, /"name":"tool_describe"/);
+  assert.match(stream, /"finish_reason":"tool_calls"/);
+  assert.ok(stream.endsWith("data: [DONE]\n\n"));
 });
