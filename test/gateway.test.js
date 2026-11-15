@@ -77,8 +77,8 @@ function makeEnv() {
     }
     if (url.hostname === 'generativelanguage.googleapis.com' && /:streamGenerateContent$/.test(url.pathname)) {
       const events = [
-        'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'stream ' }] } }] }) + '\\n\\n',
-        'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'works' }] }, finishReason: 'STOP' }] }) + '\\n\\n'
+        'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'stream ' }] } }] }) + '\n\n',
+        'data: ' + JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text: 'works' }] }, finishReason: 'STOP' }] }) + '\n\n'
       ].join('');
       return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
     }
@@ -257,6 +257,7 @@ test('model listing requires client authentication and returns discovered models
 test('native Gemini response is translated to OpenAI chat completion shape', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
+  upstreamMode = 'success';
   await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', messages: [{ role: 'user', content: 'hello' }], max_tokens: 20 } }), env);
   assert.equal(response.status, 200);
@@ -271,6 +272,7 @@ test('native Gemini response is translated to OpenAI chat completion shape', asy
 test('native Gemini SSE is translated to OpenAI SSE chunks', async () => {
   originalFetch = globalThis.fetch;
   const env = makeEnv();
+  upstreamMode = 'success';
   await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
   const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', stream: true, messages: [{ role: 'user', content: 'hello' }] } }), env);
   assert.equal(response.status, 200);
