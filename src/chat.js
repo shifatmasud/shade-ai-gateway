@@ -60,7 +60,7 @@ async function handleChat(request, env) {
   catch (cause) { console.error(JSON.stringify({ event: "provider_key_decrypt_failed", provider: "google", keyId: key.id, message: String(cause?.message || cause).slice(0, 160) })); continue; }
   const controller = new AbortController();
   // Bound upstream connection and idle-body time, not total stream lifetime.
-  const timeoutMs = Math.max(1000, Math.min(120000, Number(env.PROVIDER_TIMEOUT_MS) || 45000));
+  const timeoutMs = Math.max(1000, Math.min(120000, Number(env.PROVIDER_TIMEOUT_MS) || 120000));
   let timer = setTimeout(() => controller.abort(), timeoutMs);
   const timeout = {
    reset() { clearTimeout(timer); timer = setTimeout(() => controller.abort(), timeoutMs); },

@@ -9,11 +9,11 @@ binding = "ASSETS"
 run_worker_first = true
 
 [vars]
-PROVIDER_TIMEOUT_MS = "45000"
+PROVIDER_TIMEOUT_MS = "120000"
 ALLOWED_ORIGINS = "*"
 
 [previews.vars]
-PROVIDER_TIMEOUT_MS = "45000"
+PROVIDER_TIMEOUT_MS = "120000"
 ALLOWED_ORIGINS = "*"
 
 [observability]

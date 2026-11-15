@@ -51,7 +51,7 @@ Required Worker secrets:
 - `UPSTASH_REDIS_REST_TOKEN`
 
 Worker variables:
-- `PROVIDER_TIMEOUT_MS` (default 45000): maximum wait for upstream response headers or a period with no upstream response-body data; it is reset whenever a stream chunk arrives, so it does not cap total stream duration.
+- `PROVIDER_TIMEOUT_MS` (default 120000): maximum wait for upstream response headers or a period with no upstream response-body data; it is reset whenever a stream chunk arrives, so it does not cap total stream duration.
 - `ALLOWED_ORIGINS` (default `*` for browser clients)
 
 The configured upstream base URL is validated as HTTPS and checked against public DNS addresses to reduce SSRF risk.
