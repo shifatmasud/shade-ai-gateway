@@ -65,6 +65,18 @@ async function handleModels(request, env) {
     }
 }
 
+
+function toGeminiRequest(body) {
+ const contents=[]; let systemText="";
+ for(const m of body.messages){const role=m.role==="assistant"?"model":"user";const items=Array.isArray(m.content)?m.content:[{type:"text",text:String(m.content??"")}];const parts=[];
+ for(const item of items){if(typeof item==="string")parts.push({text:item});else if(item?.type==="text"&&typeof item.text==="string")parts.push({text:item.text});else if(item?.type==="image_url"&&item.image_url?.url?.startsWith("data:")){const match=item.image_url.url.match(/^data:([^;,]+);base64,(.+)$/);if(match)parts.push({inline_data:{mime_type:match[1],data:match[2]}});}}
+ if(m.role==="system"||m.role==="developer")systemText+=(systemText?"\n\n":"")+parts.map(p=>p.text||"").join("");else if(parts.length){const prev=contents[contents.length-1];if(prev?.role===role)prev.parts.push(...parts);else contents.push({role,parts});}}
+ const generationConfig={};if(Number.isFinite(body.temperature))generationConfig.temperature=body.temperature;if(Number.isFinite(body.top_p))generationConfig.topP=body.top_p;if(Number.isInteger(body.max_tokens))generationConfig.maxOutputTokens=body.max_tokens;if(Number.isInteger(body.max_completion_tokens))generationConfig.maxOutputTokens=body.max_completion_tokens;if(Array.isArray(body.stop))generationConfig.stopSequences=body.stop;
+ const out={contents};if(systemText)out.systemInstruction={parts:[{text:systemText}]};if(Object.keys(generationConfig).length)out.generationConfig=generationConfig;return out;
+}
+function fromGeminiResponse(payload,model){const c=payload?.candidates?.[0];const text=(c?.content?.parts||[]).map(p=>p.text||"").join("");const prompt=payload?.usageMetadata?.promptTokenCount||0;const completion=payload?.usageMetadata?.candidatesTokenCount||0;return{id:"chatcmpl-"+(payload?.responseId||crypto.randomUUID().replace(/-/g,"")),object:"chat.completion",created:Math.floor(Date.now()/1000),model,choices:[{index:0,message:{role:"assistant",content:text},finish_reason:c?.finishReason==="MAX_TOKENS"?"length":"stop"}],usage:{prompt_tokens:prompt,completion_tokens:completion,total_tokens:prompt+completion}};}
+async function geminiStreamAsOpenAI(response,model){const raw=await response.text();const id="chatcmpl-"+crypto.randomUUID().replace(/-/g,"");const chunks=[];for(const line of raw.split("\n")){if(!line.startsWith("data:"))continue;const data=line.slice(5).trim();if(!data||data==="[DONE]")continue;try{const p=JSON.parse(data);const c=p?.candidates?.[0];const content=(c?.content?.parts||[]).map(x=>x.text||"").join("");if(content)chunks.push({id,object:"chat.completion.chunk",created:Math.floor(Date.now()/1000),model,choices:[{index:0,delta:{content},finish_reason:null}]});if(c?.finishReason)chunks.push({id,object:"chat.completion.chunk",created:Math.floor(Date.now()/1000),model,choices:[{index:0,delta:{},finish_reason:c.finishReason==="MAX_TOKENS"?"length":"stop"}]});}catch{}}return new Response(chunks.map(x=>"data: "+JSON.stringify(x)+"\n\n").join("")+"data: [DONE]\n\n",{headers:{"content-type":"text/event-stream; charset=utf-8"}});}
+
 async function handleChat(request, env) {
     if (Number(request.headers.get("content-length") || 0) > MAX_BODY_BYTES)
         return error("Request body too large.", "invalid_request_error", 413);
@@ -118,7 +130,7 @@ async function handleChat(request, env) {
         let response;
         try {
             await assertPublicHost(new URL(reg.baseUrl).hostname);
-            response = await fetch(`${reg.baseUrl}/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify(body), signal: controller.signal, redirect: "manual" });
+            const nativeUrl = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(body.model)}:${body.stream ? "streamGenerateContent?alt=sse" : "generateContent"}`); nativeUrl.searchParams.set("key", apiKey); response = await fetch(nativeUrl.toString(), { method: "POST", headers: { "content-type": "application/json", accept: body.stream ? "text/event-stream" : "application/json" }, body: JSON.stringify(toGeminiRequest(body)), signal: controller.signal, redirect: "manual" });
         }
         catch (cause) {
             clearTimeout(timer);
@@ -127,15 +139,9 @@ async function handleChat(request, env) {
         }
         clearTimeout(timer);
         if (response.ok && response.body) {
-            const headers = new Headers();
-            for (const name of ["content-type", "cache-control"]) {
-                const value = response.headers.get(name);
-                if (value)
-                    headers.set(name, value);
-            }
-            headers.set("x-ai-gateway-model", body.model);
-            headers.set("cache-control", "no-store");
-            return new Response(response.body, { status: response.status, headers });
+            if (body.stream) { const translated = await geminiStreamAsOpenAI(response, body.model); return new Response(translated.body, { status: 200, headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-ai-gateway-model": body.model } }); }
+            const payload = await response.json();
+            return json(fromGeminiResponse(payload, body.model), 200, { "x-ai-gateway-model": body.model, "cache-control": "no-store" });
         }
         let detail = "";
         try {
