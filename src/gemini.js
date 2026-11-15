@@ -2,7 +2,7 @@ const schema=s=>{if(!s||typeof s!=="object"||Array.isArray(s))return{type:"OBJEC
 function toGeminiRequest(body){
  const contents=[],names=new Map();for(const m of body.messages)if(m.role==="assistant")for(const c of m.tool_calls||[])if(c.id&&c.function?.name)names.set(c.id,c.function.name);
  let systemText="";
- for(const m of body.messages){const role=m.role==="assistant"?"model":"user",parts=[],items=m.content==null&&m.role==="assistant"&&Array.isArray(m.tool_calls)?[]:Array.isArray(m.content)?m.content:[{type:"text",text:String(m.content??"")}];
+ for(const m of body.messages){const role=m.role==="assistant"?"model":"user",parts=[],items=m.role==="tool"?[]:m.content==null&&m.role==="assistant"&&Array.isArray(m.tool_calls)?[]:Array.isArray(m.content)?m.content:[{type:"text",text:String(m.content??"")}];
   for(const x of items){if(typeof x==="string")parts.push({text:x});else if(x?.type==="text"&&typeof x.text==="string")parts.push({text:x.text});else if(x?.type==="image_url"&&x.image_url?.url?.startsWith("data:")){const z=x.image_url.url.match(/^data:([^;,]+);base64,(.+)$/);if(z)parts.push({inline_data:{mime_type:z[1],data:z[2]}})}}
   if(m.role==="system"||m.role==="developer"){systemText+=(systemText?"\n\n":"")+parts.map(p=>p.text||"").join("");continue}
   if(m.role==="tool"){let result={};try{result=typeof m.content==="string"?JSON.parse(m.content):(m.content||{})}catch{result={result:String(m.content??"")}}const name=m.name||names.get(m.tool_call_id);if(name)parts.push({functionResponse:{name,response:result&&typeof result==="object"?result:{result}}})}
