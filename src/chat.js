@@ -2,6 +2,18 @@ import { REGISTRY_KEY, json, error, readLimited, redis, parseRegistry, assertPub
 import { toGeminiRequest, fromGeminiResponse, geminiStreamAsOpenAI } from "./gemini.js";
 const ROTATION_KEY = "shade-ai-gateway:key-rotation:v1";
 const MAX_BODY_BYTES = 1048576;
+function retryAfterSeconds(value) {
+    if (!value) return 60;
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return Math.max(1, Math.min(3600, Math.ceil(n)));
+    const date = Date.parse(value);
+    return Number.isFinite(date) ? Math.max(1, Math.min(3600, Math.ceil((date - Date.now()) / 1000))) : 60;
+}
+function isQuotaFailure(status, text) {
+    if (status === 429) return true;
+    if (status !== 403) return false;
+    return /(quota|resource_exhausted|rate.?limit|billing|exceeded.*(limit|quota)|limit.*exceeded)/i.test(text || "");
+}
 async function handleChat(request, env) {
     if (Number(request.headers.get("content-length") || 0) > MAX_BODY_BYTES)
         return error("Request body too large.", "invalid_request_error", 413);
