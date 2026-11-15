@@ -224,23 +224,69 @@ async function isAdmin(request, env, url) {
     return diff === 0 && received.length === `Bearer ${secret}`.length;
 }
 
-async function discoverModels(baseUrl, apiKey) {
+function normalizeModel(row, provider = "google") {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+    const sourceId = row.id || row.name;
+    if (typeof sourceId !== "string" || !sourceId.trim()) return null;
+    const id = sourceId.trim().replace(/^models\//, "");
+    return { ...row, id, object: row.object || "model", owned_by: row.owned_by || provider };
+}
+
+async function fetchModelPage(url, headers) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
-        const response = await fetch(`${baseUrl}/models`, { headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" }, signal: controller.signal, redirect: "manual" });
-        if (!response.ok)
-            return [];
+        const response = await fetch(url, { headers, signal: controller.signal, redirect: "manual" });
+        if (!response.ok) return null;
         const payload = await response.json();
-        const rows = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.models) ? payload.models : [];
-        return [...new Set(rows.map(row => String(row.id || row.name || "").replace(/^models\//, "")).filter(Boolean))].slice(0, 500);
+        if (!payload || typeof payload !== "object") return null;
+        return payload;
     }
     catch {
-        return [];
+        return null;
     }
     finally {
         clearTimeout(timer);
     }
+}
+
+async function discoverModels(baseUrl, apiKey) {
+    const headers = { authorization: `Bearer ${apiKey}`, accept: "application/json" };
+    const discovered = new Map();
+
+    // Keep the configured OpenAI-compatible model catalogue, including every
+    // field returned by the upstream rather than reducing entries to IDs.
+    const compatible = await fetchModelPage(`${baseUrl}/models`, headers);
+    const compatibleRows = Array.isArray(compatible?.data) ? compatible.data
+        : Array.isArray(compatible?.models) ? compatible.models : [];
+    for (const row of compatibleRows) {
+        const model = normalizeModel(row);
+        if (model) discovered.set(model.id, model);
+    }
+
+    // Google AI Studio also exposes the native Gemini catalogue. It carries
+    // capabilities, token limits, descriptions and other metadata absent from
+    // the OpenAI-compatible projection. Follow every page (bounded defensively).
+    let base;
+    try { base = new URL(baseUrl); } catch { return [...discovered.values()].slice(0, 1000); }
+    if (base.hostname === "generativelanguage.googleapis.com") {
+        let pageToken = "";
+        for (let page = 0; page < 20; page++) {
+            const url = new URL("https://generativelanguage.googleapis.com/v1beta/models");
+            url.searchParams.set("pageSize", "1000");
+            url.searchParams.set("key", apiKey);
+            if (pageToken) url.searchParams.set("pageToken", pageToken);
+            const payload = await fetchModelPage(url.toString(), { accept: "application/json" });
+            if (!payload) break;
+            for (const row of Array.isArray(payload.models) ? payload.models : []) {
+                const model = normalizeModel(row);
+                if (model) discovered.set(model.id, { ...discovered.get(model.id), ...model });
+            }
+            pageToken = typeof payload.nextPageToken === "string" ? payload.nextPageToken : "";
+            if (!pageToken) break;
+        }
+    }
+    return [...discovered.values()].slice(0, 1000);
 }
 
 async function adminRoutes(request, env, url) {
@@ -326,3 +372,4 @@ async function setCooldown(env, id, seconds) {
 }
 
 export { REGISTRY_KEY, json, error, readLimited, bytesToBase64, digest, redis, parseRegistry, updateRegistry, assertPublicHost, decryptSecret, adminRoutes, setCooldown, validateBaseUrl };
+[exit status 0]
