@@ -35,6 +35,7 @@ test("Gemini streaming function calls emit OpenAI tool-call deltas", async () =>
   const payload = { candidates: [{ content: { parts: [{ functionCall: { name: "get_weather", args: { city: "Dhaka" } } }] }, finishReason: "STOP" }] };
   const upstream = new Response("data: " + JSON.stringify(payload) + "\n\n", { headers: { "content-type": "text/event-stream" } });
   const stream = await geminiStreamAsOpenAI(upstream, "gemini-4-hydrogen").text();
+  assert.ok(stream.indexOf('"delta":{"role":"assistant"}') < stream.indexOf('"tool_calls"'));
   assert.match(stream, /"tool_calls"/);
   assert.match(stream, /"name":"get_weather"/);
   assert.match(stream, /"finish_reason":"tool_calls"/);
