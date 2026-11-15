@@ -80,6 +80,7 @@ async function handleChat(request, env) {
     upstreamCode: ["number", "string"].includes(typeof upstreamError?.code) ? String(upstreamError.code).slice(0, 64) : undefined,
     upstreamStatus: ["number", "string"].includes(typeof upstreamError?.status) ? String(upstreamError.status).slice(0, 64) : undefined,
     upstreamType: typeof upstreamError?.type === "string" ? upstreamError.type.slice(0, 64) : undefined,
+    unknownField: providerMessage.match(/Unknown name\\s+['"]([^'"]+)['"]/i)?.[1]?.slice(0, 64),
     errorClass: /tool|function|schema/i.test(providerMessage) ? "tool_schema" : /model/i.test(providerMessage) ? "model" : /reasoning|thinking/i.test(providerMessage) ? "reasoning" : /key|auth|permission/i.test(providerMessage) ? "auth" : /invalid|unsupported|not supported|unrecognized|unknown field|missing|required/i.test(providerMessage) ? "request_validation" : undefined,
     errorMessage: providerMessage && /(invalid|unsupported|not supported|unrecognized|unknown field|missing|required|permission|api key|quota|rate.?limit|model|tool|function|schema|reasoning|thinking)/i.test(providerMessage) ? providerMessage.replace(/["'][^"']{1,80}["']/g, "[value]").replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 180) : undefined,
     reasons: Array.isArray(upstreamError?.details) ? upstreamError.details.map(item => item?.reason).filter(value => typeof value === "string").slice(0, 5) : undefined
