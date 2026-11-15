@@ -75,6 +75,16 @@ function makeEnv() {
       assert.deepEqual(sent.messages, [{ role: 'user', content: 'hello' }]);
       if (upstreamMode === 'rotate' && upstreamGenerateCalls === 1) return new Response(JSON.stringify({ error: { message: 'RESOURCE_EXHAUSTED rate limit' } }), { status: 429, headers: { 'retry-after': '60', 'content-type': 'application/json' } });
       if (upstreamMode === 'ambiguous') return new Response(JSON.stringify({ error: { message: 'server error' } }), { status: 500 });
+      if (upstreamMode === 'tool-call') return Response.json({ id: 'chatcmpl_tool', object: 'chat.completion', model: sent.model, choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":[\"capability\"]}' } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } });
+      if (sent.stream && upstreamMode === 'tool-stream') {
+        const events = [
+          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] },
+          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":' } }] }, finish_reason: null }] },
+          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '[\"capability\"]}' } }] }, finish_reason: null }] },
+          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
+        ].map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('') + 'data: [DONE]\n\n';
+        return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
+      }
       if (sent.stream && upstreamMode === 'slow-stream') {
         const chunks = ['data: first\n\n', 'data: second\n\n', 'data: third\n\n', 'data: [DONE]\n\n'];
         let index = 0;
@@ -277,6 +287,36 @@ test('chat completion request is forwarded unchanged to the Gemini OpenAI-compat
   assert.equal(data.choices[0].message.content, 'ok');
   assert.equal(data.usage.total_tokens, 3);
   assert.equal(upstreamGenerateCalls, 1);
+});
+
+test('non-stream tool calls and tool definitions pass through the gateway unchanged', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  upstreamMode = 'tool-call';
+  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
+  const tool = { type: 'function', function: { name: 'capability', description: 'Load tool capability', parameters: { type: 'object', properties: { names: { type: 'array', items: { type: 'string' } } }, required: ['names'] } } };
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', messages: [{ role: 'user', content: 'hello' }], tools: [tool], tool_choice: 'auto' } }), env);
+  assert.equal(response.status, 200);
+  assert.deepEqual(lastUpstreamBody.tools, [tool]);
+  assert.equal(lastUpstreamBody.tool_choice, 'auto');
+  const data = await response.json();
+  assert.equal(data.choices[0].finish_reason, 'tool_calls');
+  assert.equal(data.choices[0].message.tool_calls[0].function.name, 'capability');
+  assert.deepEqual(JSON.parse(data.choices[0].message.tool_calls[0].function.arguments), { names: ['capability'] });
+});
+
+test('streaming tool calls normalize Gemini stop to OpenAI tool_calls finish reason', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  upstreamMode = 'tool-stream';
+  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', stream: true, messages: [{ role: 'user', content: 'hello' }], tools: [{ type: 'function', function: { name: 'capability', parameters: { type: 'object' } } }] } }), env);
+  assert.equal(response.status, 200);
+  const stream = await response.text();
+  assert.match(stream, /\"tool_calls\"/);
+  assert.match(stream, /\"name\":\"capability\"/);
+  assert.match(stream, /\"finish_reason\":\"tool_calls\"/);
+  assert.match(stream, /data: \[DONE\]/);
 });
 
 test('OpenAI-compatible SSE is passed through without translating chunks', async () => {

@@ -13,6 +13,67 @@ function isQuotaFailure(status, text) {
  if (status !== 403) return false;
  return /(quota|resource_exhausted|rate.?limit|billing|exceeded.*(limit|quota)|limit.*exceeded)/i.test(text || "");
 }
+function normalizeToolCallStream(response) {
+ const contentType = response.headers.get("content-type") || "";
+ if (!response.body || !/text\/event-stream/i.test(contentType)) return response;
+ const reader = response.body.getReader(), decoder = new TextDecoder(), encoder = new TextEncoder();
+ let buffer = "", hasToolCalls = false, ended = false;
+ function transformEvent(event) {
+  const lines = event.split(/\r?\n/);
+  const dataLines = [];
+  for (const line of lines) if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+  if (!dataLines.length) return event;
+  const raw = dataLines.join("\n");
+  if (!raw || raw === "[DONE]") return event;
+  let payload;
+  try { payload = JSON.parse(raw); } catch { return event; }
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  for (const choice of choices) {
+   if (Array.isArray(choice?.delta?.tool_calls) && choice.delta.tool_calls.length) hasToolCalls = true;
+  }
+  if (hasToolCalls) {
+   let changed = false;
+   for (const choice of choices) {
+    if (choice?.finish_reason === "stop") { choice.finish_reason = "tool_calls"; changed = true; }
+   }
+   if (changed) {
+    const serialized = JSON.stringify(payload);
+    let replaced = false;
+    return lines.map(line => {
+     if (!replaced && line.startsWith("data:")) { replaced = true; return "data: " + serialized; }
+     return line;
+    }).join("\n");
+   }
+  }
+  return event;
+ }
+ const stream = new ReadableStream({
+  async pull(controller) {
+   if (ended) return;
+   try {
+    while (true) {
+     const match = /\r?\n\r?\n/.exec(buffer);
+     if (match) {
+      const end = match.index + match[0].length;
+      const event = buffer.slice(0, end);
+      buffer = buffer.slice(end);
+      controller.enqueue(encoder.encode(transformEvent(event)));
+      return;
+     }
+     const { value, done } = await reader.read();
+     if (done) {
+      buffer += decoder.decode();
+      if (buffer) controller.enqueue(encoder.encode(transformEvent(buffer)));
+      ended = true; controller.close(); return;
+     }
+     buffer += decoder.decode(value, { stream: true });
+    }
+   } catch (cause) { ended = true; controller.error(cause); }
+  },
+  async cancel(reason) { ended = true; await reader.cancel(reason); }
+ });
+ return new Response(stream, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
 function responseWithCleanup(response, model, timeout) {
  const headers = new Headers(response.headers);
  for (const name of ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length", "set-cookie"]) headers.delete(name);
@@ -77,6 +138,7 @@ async function handleChat(request, env) {
   if (response.ok) {
    console.warn(JSON.stringify({ event: "upstream_response_received", provider: "google", model: body.model, status: response.status, contentType: response.headers.get("content-type") || "", streaming: body.stream === true, hasBody: Boolean(response.body), upstreamRequestId: response.headers.get("x-request-id") || response.headers.get("x-goog-request-id") || "" }));
    timeout.reset();
+   if (body.stream === true) response = normalizeToolCallStream(response);
    return responseWithCleanup(response, body.model, timeout);
   }
   let detail = "";
