@@ -35,6 +35,18 @@ async function handleChat(request, env) {
  try { raw = await readLimited(request, MAX_BODY_BYTES); if (raw === null) return error("Request body too large.", "invalid_request_error", 413); body = JSON.parse(raw); }
  catch { return error("Request body must be valid JSON.", "invalid_request_error", 400); }
  if (!body || !Array.isArray(body.messages) || typeof body.model !== "string" || !body.model.trim()) return error("Expected a model name and messages array.", "invalid_request_error", 400);
+ console.info(JSON.stringify({
+  event: "chat_request_received",
+  requestId: request.headers.get("cf-ray") || "",
+  model: body.model,
+  stream: body.stream === true,
+  messageCount: body.messages.length,
+  messageRoles: body.messages.map(message => message?.role).filter(value => typeof value === "string").slice(0, 24),
+  toolCount: Array.isArray(body.tools) ? body.tools.length : 0,
+  toolNames: Array.isArray(body.tools) ? body.tools.map(tool => tool?.function?.name).filter(value => typeof value === "string").slice(0, 24) : [],
+  requestKeys: Object.keys(body).sort().slice(0, 48),
+  firstToolSchemaKeys: body.tools?.[0]?.function?.parameters && typeof body.tools[0].function.parameters === "object" ? Object.keys(body.tools[0].function.parameters).slice(0, 24) : []
+ }));
  let reg;
  try { reg = parseRegistry(await redis(env, ["GET", REGISTRY_KEY])); } catch { return error("Key storage unavailable.", "service_unavailable", 503); }
  if (!reg.keys.length) return error("No Google AI Studio keys are configured.", "provider_not_configured", 503);
