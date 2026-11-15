@@ -11,12 +11,14 @@ let store;
 let upstreamGenerateCalls;
 let upstreamMode;
 let lastUpstreamModel;
+let lastUpstreamBody;
 
 function makeEnv() {
   store = new Map();
   upstreamGenerateCalls = 0;
   upstreamMode = 'rotate';
   lastUpstreamModel = null;
+  lastUpstreamBody = null;
   store.set('shade-ai-gateway:key-rotation:v1', '1');
   const fakeFetch = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -68,6 +70,7 @@ function makeEnv() {
       upstreamGenerateCalls++;
       const sent = JSON.parse(init.body);
       lastUpstreamModel = sent.model;
+      lastUpstreamBody = sent;
       assert.match(new Headers(init.headers).get('authorization') || '', /^Bearer google-test-secret-/);
       assert.deepEqual(sent.messages, [{ role: 'user', content: 'hello' }]);
       if (upstreamMode === 'rotate' && upstreamGenerateCalls === 1) return new Response(JSON.stringify({ error: { message: 'RESOURCE_EXHAUSTED rate limit' } }), { status: 429, headers: { 'retry-after': '60', 'content-type': 'application/json' } });
@@ -277,4 +280,26 @@ test('OpenAI-compatible SSE is passed through without translating chunks', async
   assert.match(stream, /"content":"stream "/);
   assert.match(stream, /"content":"works"/);
   assert.equal(stream.endsWith('data: [DONE]\n\n'), true);
+});
+
+test('strips only Gemini-incompatible prompt_cache_key and preserves the rest of the request', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  upstreamMode = 'success';
+  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
+  const input = {
+    model: 'gemini-3.8-flash',
+    messages: [{ role: 'user', content: 'hello' }],
+    prompt_cache_key: 'openai-cache-key',
+    temperature: 0.7,
+    max_tokens: 17
+  };
+  const response = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: input }), env);
+  assert.equal(response.status, 200);
+  assert.deepEqual(lastUpstreamBody, {
+    model: 'gemini-3.8-flash',
+    messages: [{ role: 'user', content: 'hello' }],
+    temperature: 0.7,
+    max_tokens: 17
+  });
 });
