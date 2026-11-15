@@ -25,4 +25,3 @@ enabled = true
 invocation_logs = false
 persist = true
 head_sampling_rate = 1
-redact_query_string = true
