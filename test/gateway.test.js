@@ -80,8 +80,8 @@ function makeEnv() {
       if (sent.stream && upstreamMode === 'tool-stream') {
         const events = [
           { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] },
-          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":' }, extra_content: { google: { thought_signature: 'test-thought-signature' } } }] }, finish_reason: null }] },
-          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '[\"capability\"]}' } }] }, finish_reason: null }] },
+          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":' } }] }, finish_reason: null }] },
+          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '[\"capability\"]}' }, extra_content: { google: { thought_signature: 'test-thought-signature' } } }] }, finish_reason: null }] },
           { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
         ].map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('') + 'data: [DONE]\n\n';
         return new Response(events, { headers: { 'content-type': 'text/event-stream' } });
