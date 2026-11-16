@@ -28,16 +28,26 @@ async function readThoughtSignature(env, model, toolCallId) {
   return null;
  }
 }
-async function captureThoughtSignatures(payload, env, fallbackModel) {
- let captured = 0;
+async function captureThoughtSignatures(payload, env, fallbackModel, idsByIndex = new Map()) {
+ let observed = 0, signatures = 0, cached = 0, idsResolved = 0;
  for (const choice of Array.isArray(payload?.choices) ? payload.choices : []) {
-  const calls = [...(Array.isArray(choice?.delta?.tool_calls) ? choice.delta.tool_calls : []), ...(Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [])];
-  for (const call of calls) {
+  const deltaCalls = Array.isArray(choice?.delta?.tool_calls) ? choice.delta.tool_calls : [];
+  const messageCalls = Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [];
+  for (const call of [...deltaCalls, ...messageCalls]) {
+   observed++;
+   if (typeof call?.id === "string" && Number.isInteger(call?.index)) idsByIndex.set(call.index, call.id);
+   const id = typeof call?.id === "string" ? call.id : Number.isInteger(call?.index) ? idsByIndex.get(call.index) : null;
    const signature = call?.extra_content?.google?.thought_signature;
-   if (typeof signature === "string" && await cacheThoughtSignature(env, payload?.model || fallbackModel || "", call.id, signature)) captured++;
+   if (typeof signature === "string") {
+    signatures++;
+    if (id) {
+     idsResolved++;
+     if (await cacheThoughtSignature(env, payload?.model || fallbackModel || "", id, signature)) cached++;
+    }
+   }
   }
  }
- return captured;
+ return { observed, signatures, idsResolved, cached };
 }
 async function restoreThoughtSignatures(body, env) {
  const missing = [];
@@ -90,6 +100,7 @@ function normalizeToolCallStream(response, env, model) {
  if (!response.body || !/text\/event-stream/i.test(contentType)) return response;
  const reader = response.body.getReader(), decoder = new TextDecoder(), encoder = new TextEncoder();
  let buffer = "", hasToolCalls = false, ended = false;
+ const toolCallIdsByIndex = new Map();
  async function transformEvent(event) {
   const lines = event.split(/\r?\n/);
   const dataLines = [];
@@ -99,8 +110,8 @@ function normalizeToolCallStream(response, env, model) {
   if (!raw || raw === "[DONE]") return event;
   let payload;
   try { payload = JSON.parse(raw); } catch { return event; }
-  const cachedThoughtSignatures = await captureThoughtSignatures(payload, env, model);
-  if (cachedThoughtSignatures) console.warn(JSON.stringify({ event: "thought_signatures_cached", model, count: cachedThoughtSignatures }));
+  const signatureMetadata = await captureThoughtSignatures(payload, env, model, toolCallIdsByIndex);
+  if (signatureMetadata.observed || signatureMetadata.signatures) console.warn(JSON.stringify({ event: "gemini_tool_call_metadata", model, ...signatureMetadata }));
   const choices = Array.isArray(payload.choices) ? payload.choices : [];
   for (const choice of choices) {
    if (Array.isArray(choice?.delta?.tool_calls) && choice.delta.tool_calls.length) hasToolCalls = true;
@@ -275,6 +286,9 @@ async function handleChat(request, env) {
    responseFormatKeys: body.response_format && typeof body.response_format === "object" ? Object.keys(body.response_format).slice(0, 24) : [],
    streamOptionsKeys: body.stream_options && typeof body.stream_options === "object" ? Object.keys(body.stream_options).slice(0, 24) : [],
    toolChoiceType: typeof body.tool_choice,
+   assistantToolCallCount: body.messages.reduce((count, message) => count + (message?.role === "assistant" && Array.isArray(message.tool_calls) ? message.tool_calls.length : 0), 0),
+   assistantToolCallsWithThoughtSignature: body.messages.reduce((count, message) => count + (message?.role === "assistant" && Array.isArray(message.tool_calls) ? message.tool_calls.filter(call => typeof call?.extra_content?.google?.thought_signature === "string").length : 0), 0),
+   restoredThoughtSignatures, missingThoughtSignatures,
    ...providerError
   }));
   if (isQuotaFailure(response.status, detail)) {
