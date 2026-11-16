@@ -27,6 +27,7 @@ function makeEnv() {
       const op = command[0];
       if (op === 'PING') return Response.json({ result: 'PONG' });
       if (op === 'GET') return Response.json({ result: store.get(command[1]) ?? null });
+      if (op === 'SET') { store.set(command[1], command[2]); return Response.json({ result: 'OK' }); }
       if (op === 'INCR') {
         const next = Number(store.get(command[1]) || 0) + 1;
         store.set(command[1], String(next));
@@ -79,7 +80,7 @@ function makeEnv() {
       if (sent.stream && upstreamMode === 'tool-stream') {
         const events = [
           { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] },
-          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":' } }] }, finish_reason: null }] },
+          { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{\"names\":' }, extra_content: { google: { thought_signature: 'test-thought-signature' } } }] }, finish_reason: null }] },
           { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '[\"capability\"]}' } }] }, finish_reason: null }] },
           { id: 'chatcmpl_tool', object: 'chat.completion.chunk', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }
         ].map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('') + 'data: [DONE]\n\n';
@@ -334,6 +335,31 @@ test('streaming tool calls normalize Gemini stop to OpenAI tool_calls finish rea
   assert.match(stream, /\"name\":\"capability\"/);
   assert.match(stream, /\"finish_reason\":\"tool_calls\"/);
   assert.match(stream, /data: \[DONE\]/);
+});
+
+
+test('restores Gemini thought signatures omitted by the client on tool-call continuation', async () => {
+  originalFetch = globalThis.fetch;
+  const env = makeEnv();
+  upstreamMode = 'tool-stream';
+  await worker.fetch(request('/admin/keys', { method: 'POST', auth: true, body: { apiKey: 'google-test-secret-one' } }), env);
+  const first = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', stream: true, messages: [{ role: 'user', content: 'hello' }], tools: [{ type: 'function', function: { name: 'capability', parameters: { type: 'object' } } }] } }), env);
+  assert.equal(first.status, 200);
+  const firstStream = await first.text();
+  assert.match(firstStream, /test-thought-signature/);
+  assert.equal([...store.entries()].filter(([key]) => key.startsWith('shade-ai-gateway:thought-signature:v1:')).length, 1);
+
+  upstreamMode = 'success';
+  const messages = [
+    { role: 'user', content: 'hello' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 'call_capability', type: 'function', function: { name: 'capability', arguments: '{"names":["capability"]}' } }] },
+    { role: 'tool', tool_call_id: 'call_capability', name: 'capability', content: '{"ok":true}' }
+  ];
+  const continuation = await worker.fetch(request('/v1/chat/completions', { method: 'POST', clientAuth: true, body: { model: 'gemini-4-hydrogen', messages } }), env);
+  assert.equal(continuation.status, 200);
+  assert.equal(lastUpstreamBody.messages[1].tool_calls[0].extra_content.google.thought_signature, 'test-thought-signature');
+  assert.equal(Object.hasOwn(lastUpstreamBody.messages[1], 'content'), false);
+  assert.deepEqual(lastUpstreamBody.messages[2], messages[2]);
 });
 
 test('OpenAI-compatible SSE is passed through without translating chunks', async () => {

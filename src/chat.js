@@ -1,6 +1,78 @@
-import { REGISTRY_KEY, error, readLimited, redis, parseRegistry, assertPublicHost, decryptSecret, setCooldown } from "./storage.js";
+import { REGISTRY_KEY, error, readLimited, redis, parseRegistry, assertPublicHost, decryptSecret, setCooldown, digest } from "./storage.js";
 const ROTATION_KEY = "shade-ai-gateway:key-rotation:v1";
 const MAX_BODY_BYTES = 1048576;
+const THOUGHT_SIGNATURE_PREFIX = "shade-ai-gateway:thought-signature:v1:";
+const THOUGHT_SIGNATURE_TTL_SECONDS = 1800;
+
+async function thoughtSignatureCacheKey(model, toolCallId) {
+ const hash = await digest(`${model}\n${toolCallId}`);
+ return THOUGHT_SIGNATURE_PREFIX + Array.from(hash, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+async function cacheThoughtSignature(env, model, toolCallId, signature) {
+ if (typeof toolCallId !== "string" || !toolCallId || toolCallId.length > 256 || typeof signature !== "string" || !signature || signature.length > 16384) return false;
+ try {
+  await redis(env, ["SET", await thoughtSignatureCacheKey(model, toolCallId), signature, "EX", String(THOUGHT_SIGNATURE_TTL_SECONDS)]);
+  return true;
+ } catch (cause) {
+  console.error(JSON.stringify({ event: "thought_signature_cache_failed", errorName: cause?.name || "Error" }));
+  return false;
+ }
+}
+async function readThoughtSignature(env, model, toolCallId) {
+ if (typeof toolCallId !== "string" || !toolCallId || toolCallId.length > 256) return null;
+ try {
+  const value = await redis(env, ["GET", await thoughtSignatureCacheKey(model, toolCallId)]);
+  return typeof value === "string" && value.length <= 16384 ? value : null;
+ } catch (cause) {
+  console.error(JSON.stringify({ event: "thought_signature_lookup_failed", errorName: cause?.name || "Error" }));
+  return null;
+ }
+}
+async function captureThoughtSignatures(payload, env, fallbackModel) {
+ let captured = 0;
+ for (const choice of Array.isArray(payload?.choices) ? payload.choices : []) {
+  const calls = [...(Array.isArray(choice?.delta?.tool_calls) ? choice.delta.tool_calls : []), ...(Array.isArray(choice?.message?.tool_calls) ? choice.message.tool_calls : [])];
+  for (const call of calls) {
+   const signature = call?.extra_content?.google?.thought_signature;
+   if (typeof signature === "string" && await cacheThoughtSignature(env, payload?.model || fallbackModel || "", call.id, signature)) captured++;
+  }
+ }
+ return captured;
+}
+async function restoreThoughtSignatures(body, env) {
+ const missing = [];
+ for (const message of body.messages) {
+  if (message?.role !== "assistant" || !Array.isArray(message.tool_calls)) continue;
+  for (const call of message.tool_calls) {
+   if (call?.id && !call?.extra_content?.google?.thought_signature) missing.push(call.id);
+  }
+ }
+ if (!missing.length) return { body, restored: 0, missing: 0 };
+ const signatures = new Map();
+ for (const id of new Set(missing)) {
+  const signature = await readThoughtSignature(env, body.model, id);
+  if (signature) signatures.set(id, signature);
+ }
+ if (!signatures.size) return { body, restored: 0, missing: missing.length };
+ let restored = 0;
+ const messages = body.messages.map(message => {
+  if (message?.role !== "assistant" || !Array.isArray(message.tool_calls)) return message;
+  let changed = false;
+  const tool_calls = message.tool_calls.map(call => {
+   const signature = signatures.get(call?.id);
+   if (!signature || call?.extra_content?.google?.thought_signature) return call;
+   const extra = call.extra_content && typeof call.extra_content === "object" ? call.extra_content : {};
+   const google = extra.google && typeof extra.google === "object" ? extra.google : {};
+   changed = true; restored++;
+   return { ...call, extra_content: { ...extra, google: { ...google, thought_signature: signature } } };
+  });
+  return changed ? { ...message, tool_calls } : message;
+ });
+ return { body: { ...body, messages }, restored, missing: missing.length - restored };
+}
+async function captureNonStreamingThoughtSignatures(response, env, model) {
+ try { await captureThoughtSignatures(await response.clone().json(), env, model); } catch {}
+}
 function retryAfterSeconds(value) {
  if (!value) return 60;
  const n = Number(value);
@@ -13,12 +85,12 @@ function isQuotaFailure(status, text) {
  if (status !== 403) return false;
  return /(quota|resource_exhausted|rate.?limit|billing|exceeded.*(limit|quota)|limit.*exceeded)/i.test(text || "");
 }
-function normalizeToolCallStream(response) {
+function normalizeToolCallStream(response, env, model) {
  const contentType = response.headers.get("content-type") || "";
  if (!response.body || !/text\/event-stream/i.test(contentType)) return response;
  const reader = response.body.getReader(), decoder = new TextDecoder(), encoder = new TextEncoder();
  let buffer = "", hasToolCalls = false, ended = false;
- function transformEvent(event) {
+ async function transformEvent(event) {
   const lines = event.split(/\r?\n/);
   const dataLines = [];
   for (const line of lines) if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
@@ -27,6 +99,8 @@ function normalizeToolCallStream(response) {
   if (!raw || raw === "[DONE]") return event;
   let payload;
   try { payload = JSON.parse(raw); } catch { return event; }
+  const cachedThoughtSignatures = await captureThoughtSignatures(payload, env, model);
+  if (cachedThoughtSignatures) console.warn(JSON.stringify({ event: "thought_signatures_cached", model, count: cachedThoughtSignatures }));
   const choices = Array.isArray(payload.choices) ? payload.choices : [];
   for (const choice of choices) {
    if (Array.isArray(choice?.delta?.tool_calls) && choice.delta.tool_calls.length) hasToolCalls = true;
@@ -57,13 +131,13 @@ function normalizeToolCallStream(response) {
       const end = match.index + match[0].length;
       const event = buffer.slice(0, end);
       buffer = buffer.slice(end);
-      controller.enqueue(encoder.encode(transformEvent(event)));
+      controller.enqueue(encoder.encode(await transformEvent(event)));
       return;
      }
      const { value, done } = await reader.read();
      if (done) {
       buffer += decoder.decode();
-      if (buffer) controller.enqueue(encoder.encode(transformEvent(buffer)));
+      if (buffer) controller.enqueue(encoder.encode(await transformEvent(buffer)));
       ended = true; controller.close(); return;
      }
      buffer += decoder.decode(value, { stream: true });
@@ -98,7 +172,10 @@ async function handleChat(request, env) {
  if (!body || !Array.isArray(body.messages) || typeof body.model !== "string" || !body.model.trim()) return error("Expected a model name and messages array.", "invalid_request_error", 400);
  const strippedFields = [];
  let upstreamBody = raw;
- let forwarded = body;
+ const signatureRestore = await restoreThoughtSignatures(body, env);
+ let forwarded = signatureRestore.body;
+ const restoredThoughtSignatures = signatureRestore.restored;
+ const missingThoughtSignatures = signatureRestore.missing;
  if (Object.prototype.hasOwnProperty.call(body, "prompt_cache_key")) {
   forwarded = { ...forwarded };
   delete forwarded.prompt_cache_key;
@@ -149,9 +226,10 @@ async function handleChat(request, env) {
    return error("Upstream connection failed; request was not retried to avoid duplicate usage.", "upstream_error", 502);
   }
   if (response.ok) {
-   console.warn(JSON.stringify({ event: "upstream_response_received", provider: "google", model: body.model, status: response.status, contentType: response.headers.get("content-type") || "", streaming: body.stream === true, hasBody: Boolean(response.body), upstreamRequestId: response.headers.get("x-request-id") || response.headers.get("x-goog-request-id") || "" }));
+   console.warn(JSON.stringify({ event: "upstream_response_received", provider: "google", model: body.model, status: response.status, contentType: response.headers.get("content-type") || "", streaming: body.stream === true, hasBody: Boolean(response.body), restoredThoughtSignatures, missingThoughtSignatures, upstreamRequestId: response.headers.get("x-request-id") || response.headers.get("x-goog-request-id") || "" }));
    timeout.reset();
-   if (body.stream === true) response = normalizeToolCallStream(response);
+   if (body.stream === true) response = normalizeToolCallStream(response, env, body.model);
+   else await captureNonStreamingThoughtSignatures(response, env, body.model);
    return responseWithCleanup(response, body.model, timeout);
   }
   let detail = "";
